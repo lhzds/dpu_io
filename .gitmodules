@@ -1,0 +1,6 @@
+[submodule "docacxx"]
+	path = deps/docacxx
+	url = git@github.com:lhzds/docacxx.git
+[submodule "deps/spdk"]
+	path = deps/spdk
+	url = git@github.com:spdk/spdk.git

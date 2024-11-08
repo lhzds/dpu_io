@@ -62,6 +62,7 @@ void write_bench(BlobFs &blobfs, size_t round) {
     for (size_t i = 1; i <= round; ++i) {
         while (write_offset < LIMIT_SIZE * i) {
             ++write_cnt;
+
             blobfs.write_async(*f, buf, write_offset, [&](int fserrno) {
                 if (fserrno < 0) {
                     throw std::runtime_error("write error");
@@ -72,7 +73,7 @@ void write_bench(BlobFs &blobfs, size_t round) {
         }
 
         while (write_cnt > 0);
-   
+
         ++fsync_cnt;
         blobfs.fsync_async(*f, [&](int fserrno) {
             if (fserrno < 0) {

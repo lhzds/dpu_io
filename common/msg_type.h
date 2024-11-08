@@ -1,14 +1,16 @@
 #pragma once
 
-#include "bytes.h"
 #include <cassert>
 #include <cstddef>
 #include <stdexcept>
 
+#include "bytes.h"
+#include "util.h"
+
 template<typename T>
 static inline T *parse(ConstBytesView view) {
     if (sizeof(T) != view.size()) {
-        throw std::runtime_error("parsing failed: size mismatch");
+        throw_with("parsing failed: size mismatch");
     }
     return (T *)view.data();
 }

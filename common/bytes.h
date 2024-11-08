@@ -1,17 +1,11 @@
 #pragma once
 
-#include "noncopyable.h"
 #include <array>
 #include <stdexcept>
 #include <string_view>
 #include <vector>
 
-#pragma once
-
-#include <array>
-#include <stdexcept>
-#include <string_view>
-#include <vector>
+#include "util.h"
 
 class ConstBytesView {
 public:
@@ -211,7 +205,7 @@ public:
 
     ConstBytesView read(size_t n) {
         if (empty()) {
-            throw std::runtime_error("run out of all bytes");
+            throw_with("run out of all bytes");
         }
         // 如果要读取的数据在内存上连续
         if (n < m_now_bytes) {

@@ -16,7 +16,7 @@
 
 std::string bdev_name;
 std::string json_config_file;
-std::string filename;
+std::vector<std::string> filenames;
 
 struct BlobFsSpdkCtx {
     static spdk_thread *app_thread;
@@ -47,51 +47,54 @@ void read_args(int argc, char **argv) {
 
     bdev_name = program.get<std::string>("-b");
     json_config_file = program.get<std::string>("-j");
-    filename = TMP_FILE_NAME;
 }
 
-void write_bench(BlobFs &blobfs, const std::string_view &filename, size_t round) {
-    auto f = blobfs.open(filename.data(), SPDK_BLOBFS_OPEN_CREATE);
-    if (not f.has_value()) {
-        throw std::runtime_error("failed to open " + std::string(filename));
-    }
+void write_bench(BlobFs &blobfs) {
+    BytesBuffer buf(WRITE_BUF_SIZE);
 
-    BytesBuffer buf(BUF_SIZE);
-    size_t write_offset{};
+    for (size_t i = 0; i < ROUND; ++i) {
+        auto f = blobfs.open(filenames[i].data(), SPDK_BLOBFS_OPEN_CREATE);
+        if (not f.has_value()) {
+            throw_with("failed to open " + std::string(filenames[i]));
+        }
 
-    for (size_t i = 1; i <= round; ++i) {
-        while (write_offset < LIMIT_SIZE * i) {
-            if (blobfs.write(*f, buf, write_offset) < 0) {
-                throw std::runtime_error("write error");
+        size_t offset{};
+        
+        for (size_t j = 0; j < ROUND; ++j) {    
+            for (size_t k = 0; k < WRITE_BUF_NUM_PER_ROUND; ++k) {
+                if (auto ret = blobfs.write(*f, buf, offset); ret < 0) {
+                    throw_with("write error: {}", ret);
+                }
+                offset += WRITE_BUF_SIZE;
             }
-            write_offset += BUF_SIZE;
+
+            if (auto ret = blobfs.fsync(*f); ret < 0) {
+                throw_with("fsync error: {}", ret);
+            }
         }
 
-        if (blobfs.fsync(*f) < 0) {
-            throw std::runtime_error("fdatasync error");
+        if (auto ret = blobfs.close(*f); ret < 0) {
+            throw_with("close error: {}", ret);
         }
-    }
-
-    if (blobfs.close(*f) < 0) {
-        throw std::runtime_error("close error");
     }
 }
 
 int main(int argc, char **argv) {
     read_args(argc, argv);
 
+    for (size_t i{}; i < ROUND; ++i) {
+        filenames.emplace_back(TMP_FILE_PREFIX + std::to_string(i));
+    }
+
     BlobFs::set_cache_size(BLOBFS_CACHE_SIZE_MB);
     BlobFs blobfs(bdev_name, "blobfs", json_config_file);
 
     auto time = clock([&] {
-        write_bench(blobfs, TMP_FILE_NAME, ROUND);
+        write_bench(blobfs);
     });
     using namespace std::chrono;
     std::cout << "blobfs sync write bench: " 
         << duration_str(duration_cast<Duration>(time)) << std::endl;
 
-    if (blobfs.remove(filename) < 0) {
-        throw std::runtime_error("remove error");
-    }
     return 0;
 }

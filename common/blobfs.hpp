@@ -174,6 +174,8 @@ public:
         send_request_to_app_thread(call_request_cb, request_fn);
     }
 
+    static constexpr size_t MAX_OUTSTANDING_REQUESTS = SPDK_BLOBFS_MAX_OPS;
+
 private:
     using RequestCb = std::function<void()>;
 

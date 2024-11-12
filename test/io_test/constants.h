@@ -8,10 +8,11 @@
 using Duration = std::chrono::microseconds;
 
 // common
-constexpr size_t BUF_SIZE = 1 * KB;
-constexpr size_t LIMIT_SIZE = 64 * MB;
-constexpr char TMP_FILE_NAME[] = "tmp_file";
-constexpr size_t ROUND = 5;
+constexpr size_t WRITE_BUF_SIZE = 4 * KB;
+constexpr char TMP_FILE_PREFIX[] = "tmp_file";
+constexpr size_t FILE_NUM = 10;
+constexpr size_t ROUND = 10;
+constexpr size_t WRITE_BUF_NUM_PER_ROUND = 100;
 
 // blobfs
 constexpr size_t BLOBFS_CACHE_SIZE_MB = 1024;

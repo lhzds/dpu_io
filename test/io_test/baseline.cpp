@@ -1,9 +1,11 @@
 #include <argparse/argparse.hpp>
 #include <chrono>
 #include <cstdlib>
+#include <cstring>
 #include <fcntl.h>
 #include <fmt/format.h>
 #include <iostream>
+#include <string>
 #include <sys/ioctl.h>
 #include <unistd.h>
 
@@ -13,7 +15,7 @@
 #include "print_util.h"
 
 std::string test_dir;
-std::string filename;
+std::vector<std::string> filenames;
 
 void read_args(int argc, char **argv) {
     argparse::ArgumentParser program("baseline");
@@ -35,48 +37,53 @@ void read_args(int argc, char **argv) {
     if (not test_dir.ends_with('/')) {
         test_dir.push_back('/');
     }
-    filename = test_dir + TMP_FILE_NAME;
 }
 
-void write_bench(size_t round) {
-    int fd = open(filename.data(), O_WRONLY|O_CREAT|O_TRUNC, 0644);
-    if (fd < 0) {
-        throw std::runtime_error(fmt::format("failed to open {}: {}", filename, strerror(errno)));
-    }
+void write_bench() {
+    BytesBuffer buf(WRITE_BUF_SIZE);
 
-    BytesBuffer buf(BUF_SIZE);
-    size_t write_offset{};
+    for (size_t i = 0; i < FILE_NUM; ++i) {
+        int fd = open(filenames[i].data(), O_WRONLY|O_CREAT|O_TRUNC, 0644);
+        if (fd < 0) {
+            throw_with("failed to open {}: {}", filenames[i], strerror(errno));
+        }
 
-    for (size_t i = 1; i <= round; ++i) {
-        while (write_offset < LIMIT_SIZE * i) {
-            if (write(fd, buf.data(), BUF_SIZE) < 0) {
-                throw std::runtime_error("write error");
+        for (size_t j = 0; j < ROUND; ++j) {
+            for (size_t k = 0; k < WRITE_BUF_NUM_PER_ROUND; ++k) {
+                if (write(fd, buf.data(), WRITE_BUF_SIZE) < 0) {
+                    throw_with("write error: {}", strerror(errno));
+                }
             }
-            write_offset += BUF_SIZE;
-        }
 
-        if (fdatasync(fd) < 0) {
-            throw std::runtime_error("fdatasync error");
+            if (fdatasync(fd) < 0) {
+                throw_with("fdatasync error: {}", strerror(errno));
+            }   
         }
-    }
-
-    if (close(fd) < 0) {
-        throw std::runtime_error("close error");
+    
+        if (close(fd) < 0) {
+            throw_with("close error: {}", strerror(errno));
+        }
     }
 }
 
 int main(int argc, char **argv) {
     read_args(argc, argv);
 
+    for (size_t i{}; i < ROUND; ++i) {
+        filenames.emplace_back(test_dir + TMP_FILE_PREFIX + std::to_string(i));
+    }
+
     auto time = clock([&] {
-        write_bench(ROUND);
+        write_bench();
     });
     using namespace std::chrono;
     std::cout << "baseline write bench: " 
         << duration_str(duration_cast<Duration>(time)) << std::endl;
     
-    if (remove(filename.data()) < 0) {
-        throw std::runtime_error("unlink error");
+    for (const auto &f : filenames) {
+        if (remove(f.data()) < 0) {
+            throw_with("unlink error: {}", strerror(errno));
+        }
     }
     return 0;
 }

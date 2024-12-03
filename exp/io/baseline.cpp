@@ -10,9 +10,9 @@
 #include <unistd.h>
 
 #include "bytes.h"
-#include "clock.h"
-#include "constants.h"
-#include "print_util.h"
+#include "io_constants.h"
+#include "test_util/clock.h"
+#include "test_util/print_format.h"
 
 std::string test_dir;
 std::vector<std::string> filenames;

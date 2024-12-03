@@ -3,7 +3,7 @@
 #include <chrono>
 #include <cstddef>
 
-#include "print_util.h"
+#include "constant.h"
 
 using Duration = std::chrono::microseconds;
 

@@ -7,11 +7,11 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 
-#include "blobfs.hpp"
 #include "bytes.h"
-#include "clock.h"
-#include "constants.h"
-#include "print_util.h"
+#include "io/blobfs.hpp"
+#include "io_constants.h"
+#include "test_util/clock.h"
+#include "test_util/print_format.h"
 
 struct BlobFsSpdkCtx {
     static spdk_thread *app_thread;

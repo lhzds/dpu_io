@@ -11,7 +11,7 @@ class ConstBytesView {
 public:
     ConstBytesView(const std::string &str): m_data(str.data()), m_size(str.size()) {}
     ConstBytesView(std::string_view sv): m_data(sv.data()), m_size(sv.size()) {}
-    ConstBytesView(char const *data, size_t size): m_data(data), m_size(size) {}
+    ConstBytesView(const char *data, size_t size): m_data(data), m_size(size) {}
 
     const char *data() const noexcept { return m_data; }
     size_t size() const noexcept { return m_size; }
@@ -50,7 +50,7 @@ public:
     char *begin() const noexcept { return data(); }
     char *end() const noexcept { return data() + size(); }
 
-    BytesView subspan(size_t start, size_t len) const {
+    BytesView subspan(size_t start, size_t len = static_cast<size_t>(-1)) const {
         if (start > size()) {
             throw std::out_of_range("bytes_view::subspan");
         }

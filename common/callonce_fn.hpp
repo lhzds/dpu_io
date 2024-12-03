@@ -1,5 +1,4 @@
 #include <functional>
-#include <iostream>
 #include <memory>
 
 template <typename Ret, typename... Args>

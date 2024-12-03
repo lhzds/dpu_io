@@ -7,10 +7,10 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 
-#include "blobfs.hpp"
 #include "bytes.h"
 #include "clock.h"
-#include "constants.h"
+#include "io/blobfs.hpp"
+#include "io_constants.h"
 #include "print_util.h"
 #include "spdk/blobfs.h"
 

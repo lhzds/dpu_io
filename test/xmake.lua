@@ -1,7 +1,12 @@
-add_includedirs("util")
+add_requires("gtest")
 
 target("ring_buffer_test")
     set_kind("binary")
     add_files("ring_buffer_test.cpp")
+    add_packages("gtest")
 
-includes("io_test/xmake.lua")
+target("queue_dma_test")
+    set_kind("binary")
+    add_files("queue_dma_test.cpp")
+    add_deps("docacxx")
+    add_packages("gtest")

@@ -105,11 +105,11 @@ public:
         return data() + size();
     }
 
-    ConstBytesView subspan(size_t start, size_t len) const {
+    ConstBytesView subspan(size_t start, size_t len = static_cast<size_t>(-1)) const {
         return operator ConstBytesView().subspan(start, len);
     }
 
-    BytesView subspan(size_t start, size_t len) {
+    BytesView subspan(size_t start, size_t len = static_cast<size_t>(-1)) {
         return operator BytesView().subspan(start, len);
     }
 

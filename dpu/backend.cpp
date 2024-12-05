@@ -1,0 +1,106 @@
+#include "backend.h"
+#include "bytes.h"
+#include "constant.h"
+#include "dma_qp_mapping.h"
+#include "docacxx/ctx/server.h"
+#include "format.h"
+#include "io/mem_io_mock.h"
+
+#include <doca_pe.h>
+#include <memory>
+
+namespace pulsedb {
+Backend::Backend(const std::string_view &name, const std::string_view &dev_pci,
+    const std::string_view &dev_rep_pci) {
+    m_io_ctx = std::make_unique<MemIoMock>();
+
+    docacxx::check_derr(docacxx::open_doca_device_with_pci(dev_pci.data(), &m_dev),
+        "failed to open dev");
+    docacxx::check_derr(docacxx::open_doca_device_rep_with_pci(m_dev, DOCA_DEVINFO_REP_FILTER_NET,
+        dev_rep_pci.data(), &m_dev_rep), "failed to open dev rep");
+    docacxx::check_derr(doca_pe_create(&m_pe), "failed to create pe");
+
+    m_dma = std::make_unique<QueueDma>(m_pe, m_dev, DPU_DMA_TASK_SLOT_NUM);
+    m_dma->start_sync();
+
+    m_ctrl_server = std::make_unique<docacxx::comch::Server>(name.data(), m_dev, m_dev_rep,
+        m_pe, docacxx::comch::Server::Cfg{1}); // 消息同步传输，所以只分配一个task slot
+    m_ctrl_server->set_new_conn_cb([&](doca_comch_connection *conn) {
+        m_conn = conn;
+    });
+    m_ctrl_server->set_new_consumer_cb([&](doca_comch_connection *conn, uint32_t id) {
+        m_new_consumer_id = id;
+    });
+    m_ctrl_server->set_send_cb([&](auto) {
+        m_is_ctrl_msg_sended = true;
+    });
+    m_ctrl_server->set_recv_cb([&](doca_comch_connection *conn, uint8_t *data, uint32_t len) {
+        ConstBytesView bytes((char *)data, len);
+        m_ctrl_msg_variant = CtrlMsg::read(bytes);
+    });
+    m_ctrl_server->start_sync();
+    
+    // 等待客户端连接
+    while (not m_conn) {
+        doca_pe_progress(m_pe);
+    }
+
+    auto qp_num = recv_ctrl_msg<CtrlMsg::InitMsg>().header->qp_num;
+    send_ack_msg();
+
+    m_qps.reserve(qp_num);
+    for (size_t i{}; i < qp_num; ++i) {
+        auto init_qp_msg = recv_ctrl_msg<CtrlMsg::InitQpMsg>();
+        send_ack_msg();
+        auto *header = init_qp_msg.header;
+        
+        // 使用 1:1 大小的队列映射
+        m_qps.emplace_back(std::make_unique<DmaQpMapping>(*this, m_io_ctx.get(),
+            header->host_req_mem_size,
+            ConstBytesView(init_qp_msg.host_req_mmap_desc, header->host_req_mmap_desc_size),
+            header->host_req_mem_addr, header->host_req_mem_size,
+
+            header->host_resp_mem_size,
+            ConstBytesView(init_qp_msg.host_resp_mmap_desc, header->host_resp_mmap_desc_size),
+            header->host_resp_mem_addr, header->host_resp_mem_size
+        ));
+    }
+}
+
+template<class CtrlMsgType>
+CtrlMsgType Backend::recv_ctrl_msg() {
+    while (not m_ctrl_msg_variant) {
+        doca_pe_progress(m_pe);
+    }
+
+    auto ret = std::get<CtrlMsgType>(*m_ctrl_msg_variant);
+    m_ctrl_msg_variant = std::nullopt;
+    return ret;
+}
+
+void Backend::send_ctrl_msg(const ConstBytesView &raw_msg) {
+    m_is_ctrl_msg_sended = false;
+    auto task = m_ctrl_server->alloc_send_task(m_conn, raw_msg.data(), raw_msg.size(), nullptr);
+    auto ret = m_ctrl_server->submit(std::move(task));
+    while (ret) {
+        doca_pe_progress(m_pe);
+        ret = m_ctrl_server->submit(std::move(ret));
+    }
+    while (not m_is_ctrl_msg_sended) {
+        doca_pe_progress(m_pe);
+    }
+}
+
+void Backend::send_ack_msg() {
+    send_ctrl_msg(CtrlMsg::make_ack_msg());
+}
+
+size_t Backend::recv_new_conumser_id() {
+    while (not m_new_consumer_id) {
+        doca_pe_progress(m_pe);
+    }
+    auto ret = *m_new_consumer_id;
+    m_new_consumer_id = std::nullopt;
+    return ret;
+}
+}

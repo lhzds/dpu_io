@@ -2,12 +2,15 @@
 
 #include <cassert>
 #include <cstddef>
+#include <memory>
 #include <variant>
 
 #include "bytes.h"
+#include "noncopyable.h"
 #include "ring_buffer.h"
 #include "util.h"
 
+namespace pulsedb {
 // 控制路径消息，不需要环形队列同步传输
 // 构造消息时会发生拷贝，读消息时无拷贝
 struct CtrlMsg {
@@ -67,7 +70,8 @@ struct CtrlMsg {
         char *host_resp_mem_addr, size_t host_resp_mem_size,
         const ConstBytesView &host_req_mmap_desc,
         const ConstBytesView &host_resp_mmap_desc) {
-        BytesBuffer msg(sizeof(InitQpHeader) + host_req_mem_size + host_resp_mem_size);
+        BytesBuffer msg(sizeof(InitQpHeader) + host_req_mmap_desc.size()
+            + host_resp_mmap_desc.size());
         BytesView dst(msg);
 
         auto *header = (InitQpHeader *)dst.data();
@@ -155,6 +159,8 @@ struct CtrlMsg {
                 ack_msg.header = (AckHeader *)src.data();
                 return ack_msg;
             }
+            default:
+                throw_with("unsupported type");
         }
     }
 };
@@ -170,8 +176,8 @@ struct RingBufferResponse {
 
     struct CommonHeader {
         Type type;
-        int32_t error_code;
         size_t req_id;
+        int32_t error_code;
     };
     struct OpenHeader: CommonHeader {
         size_t file_id;
@@ -185,23 +191,33 @@ struct RingBufferResponse {
 
     // 如果内存不连续，那么将完整拷贝一份到堆中
     // (Read Response 读到的数据除外，这部分数据向量化接口 I/O)
-    struct OpenResponse {
-        bool is_owner{};
+    struct OpenResponse: public Noncopyable {
         OpenHeader *header{};
+        ~OpenResponse() {
+            if (m_owner_flag & 1) {
+                delete header;
+            }
+        }
 
         size_t size() const {
             return sizeof(OpenHeader);
         }
-        ~OpenResponse() {
-            if (is_owner) {
+
+        void be_header_owner() {
+            m_owner_flag &= 1;
+        }
+
+    private:
+        uint8_t m_owner_flag{}; // 1: header
+    };
+    struct ReadResponse: public Noncopyable {
+        ReadHeader *header{};
+        std::optional<RingBuffer::View> content;
+        ~ReadResponse() {
+            if (m_owner_flag & 1) {
                 delete header;
             }
         }
-    };
-    struct ReadResponse {
-        bool is_owner{};
-        ReadHeader *header{};
-        std::optional<RingBuffer::View> content;
 
         size_t size() const {
             size_t ret = sizeof(ReadHeader);
@@ -210,97 +226,125 @@ struct RingBufferResponse {
             }
             return ret;
         }
-        ~ReadResponse() {
-            if (is_owner) {
+
+        void be_header_owner() {
+            m_owner_flag &= 1;
+        }
+
+    private:
+        uint8_t m_owner_flag{}; // 1: header
+    };
+    struct WriteResponse: public Noncopyable {
+        WriteHeader *header{};
+        ~WriteResponse() {
+            if (m_owner_flag & 1) {
                 delete header;
             }
         }
-    };
-    struct WriteResponse {
-        bool is_owner{};
-        WriteHeader *header{};
 
         size_t size() const {
             return sizeof(WriteHeader);
         }
-        ~WriteResponse() {
-            if (is_owner) {
+        
+        void be_header_owner() {
+            m_owner_flag &= 1;
+        }
+
+    private:
+        uint8_t m_owner_flag{}; // 1: header
+    };
+    struct FsyncResponse: public Noncopyable {
+        FsyncHeader *header{};
+        ~FsyncResponse() {
+            if (m_owner_flag & 1) {
                 delete header;
             }
         }
-    };
-    struct FsyncResponse {
-        bool is_owner{};
-        FsyncHeader *header{};
 
         size_t size() const {
             return sizeof(FsyncHeader);
         }
-        ~FsyncResponse() {
-            if (is_owner) {
+
+        void be_header_owner() {
+            m_owner_flag &= 1;
+        }
+
+    private:
+        uint8_t m_owner_flag{}; // 1: header
+    };
+    struct CloseResponse: public Noncopyable {
+        CloseHeader *header{};
+        ~CloseResponse() {
+            if (m_owner_flag & 1) {
                 delete header;
             }
         }
-    };
-    struct CloseResponse {
-        bool is_owner{};
-        CloseHeader *header{};
 
         size_t size() const {
             return sizeof(CloseHeader);
         }
-        ~CloseResponse() {
-            if (is_owner) {
-                delete header;
-            }
+
+        void be_header_owner() {
+            m_owner_flag &= 1;
         }
+
+    private:
+        uint8_t m_owner_flag{}; // 1: header
     };
-    using Variant = std::variant<OpenResponse, ReadResponse, WriteResponse, FsyncResponse, CloseResponse>;
+    // 引入所有权机制，只有不需要时才进行析构
+    using Variant = std::variant<std::unique_ptr<OpenResponse>, std::unique_ptr<ReadResponse>, std::unique_ptr<WriteResponse>,
+        std::unique_ptr<FsyncResponse>, std::unique_ptr<CloseResponse>>;
+    template<typename RespType>
+    static std::unique_ptr<RespType> get_req_ptr(Variant& variant) {
+        return std::move(std::get<std::unique_ptr<RespType>>(variant));
+    }
 
     static Variant read(RingBuffer::View &src) {
-        Type resp_type{};
-        {
-            auto copy = src;
-            auto common_header = copy.cut(sizeof(CommonHeader));
-            if (common_header.second_part()) {
-                auto merged_common_header = common_header.merge();
-                resp_type = ((CommonHeader *)merged_common_header.data())->type;
-            } else {
-                resp_type = ((CommonHeader *)common_header.first_part().data())->type;
-            }
-        }
+        Type resp_type = read_resp_type(src);
 
         switch (resp_type) {
             case Type::OPEN: {
-                OpenResponse resp;
-                ref_or_copy_resp_header(src, resp);
+                auto resp = std::make_unique<OpenResponse>();
+                ref_or_copy_resp_header(src, *resp);
                 return resp;
             }
             case Type::READ: {
-                ReadResponse resp;
-                ref_or_copy_resp_header(src, resp);
-                resp.content = src.cut(resp.header->actual_read_size);
+                auto resp = std::make_unique<ReadResponse>();
+                ref_or_copy_resp_header(src, *resp);
+                resp->content = src.cut(resp->header->actual_read_size);
                 return resp;
             }
             case Type::WRITE: {
-                WriteResponse resp;
-                ref_or_copy_resp_header(src, resp);
+                auto resp = std::make_unique<WriteResponse>();
+                ref_or_copy_resp_header(src, *resp);
                 return resp;
             }
             case Type::FSYNC: {
-                FsyncResponse resp;
-                ref_or_copy_resp_header(src, resp);
+                auto resp = std::make_unique<FsyncResponse>();
+                ref_or_copy_resp_header(src, *resp);
                 return resp;
             }
             case Type::CLOSE: {
-                CloseResponse resp;
-                ref_or_copy_resp_header(src, resp);
+                auto resp = std::make_unique<CloseResponse>();
+                ref_or_copy_resp_header(src, *resp);
                 return resp;
             }
         }
     }
 
 private:
+    static Type read_resp_type(RingBuffer::View src) {
+        Type resp_type{};
+        auto common_header = src.cut(sizeof(CommonHeader));
+        if (common_header.second_part()) {
+            auto merged_common_header = common_header.merge();
+            resp_type = ((CommonHeader *)merged_common_header.data())->type;
+        } else {
+            resp_type = ((CommonHeader *)common_header.first_part().data())->type;
+        }
+        return resp_type;
+    }
+
     template<class Response>
     static void ref_or_copy_resp_header(RingBuffer::View &src, Response &resp) {
         using Header =  std::remove_reference_t<decltype(*resp.header)>;
@@ -309,10 +353,9 @@ private:
         if (header_rb_slice.second_part()) {
             stream = new char[header_rb_slice.size()];
             header_rb_slice.merge({stream, header_rb_slice.size()});
-            resp.is_owner = true;
+            resp.be_header_owner();
         } else {
             stream = header_rb_slice.first_part().data();
-            resp.is_owner = false;
         }
         resp.header = (Header *)stream;
     }
@@ -356,65 +399,135 @@ struct RingBufferRequest {
 
     // 如果内存不连续，那么将完整拷贝一份到堆中
     // (Write Request 要写入的数据，这部分将调用 writev 接口向量化写入)
-    struct OpenRequest {
-        bool is_owner{};
+    struct OpenRequest: public Noncopyable {
         OpenHeader *header{};
         char *filename{};
+        ~OpenRequest() {
+            if (m_owner_flag & 1) {
+                delete header;
+            }
+            if (m_owner_flag & 2) {
+                delete[] filename;
+            }
+        }
+
+        size_t size() const {
+            return sizeof(OpenHeader) + header->filename_size;
+        }
         size_t estimated_resp_size() const {
             return sizeof(RingBufferResponse::OpenHeader);
         }
 
-        ~OpenRequest() {
-            delete header;
-            delete[] filename;
+        void be_header_owner() {
+            m_owner_flag &= 1;
         }
+        void be_filename_owner() {
+            m_owner_flag &= 2;
+        }
+
+    private:
+        uint8_t m_owner_flag{}; // 1: header, 2: filename
     };
-    struct ReadRequest {
-        bool is_owner{};
+    struct ReadRequest: public Noncopyable  {
         ReadHeader *header{};
+        ~ReadRequest() {
+           if (m_owner_flag & 1) {
+                delete header;
+            }
+        }
+
+        size_t size() const {
+            return sizeof(ReadHeader);
+        }
         size_t estimated_resp_size() const {
             return sizeof(RingBufferResponse::ReadHeader) + header->read_size;
         }
 
-        ~ReadRequest() {
-            delete header;
+        void be_header_owner() {
+            m_owner_flag &= 1;
         }
+
+    private:
+        uint8_t m_owner_flag{}; // 1: header
     };
-    struct WriteRequest {
-        bool is_owner{};
-        WriteHeader *header;
+    struct WriteRequest: public Noncopyable  {
+        WriteHeader *header{};
         std::optional<RingBuffer::View> content;
+        ~WriteRequest() {
+            if (m_owner_flag & 1) {
+                delete header;
+            }
+        }
+
+        size_t size() const {
+            auto ret = sizeof(WriteHeader);
+            if (content) {
+                ret += content->size();
+            }
+            return ret;
+        }
         size_t estimated_resp_size() const {
             return sizeof(RingBufferResponse::WriteHeader);
         }
 
-        ~WriteRequest() {
-            delete header;
+        void be_header_owner() {
+            m_owner_flag &= 1;
         }
+
+    private:
+        uint8_t m_owner_flag{}; // 1: header
     };
-    struct FsyncRequest {
-        bool is_owner{};
-        FsyncHeader *header;
+    struct FsyncRequest: public Noncopyable  {
+        FsyncHeader *header{};
+        ~FsyncRequest() {
+            if (m_owner_flag & 1) {
+                delete header;
+            }
+        }
+
+        size_t size() const {
+            return sizeof(FsyncHeader);
+        }
         size_t estimated_resp_size() const {
             return sizeof(RingBufferResponse::FsyncHeader);
         }
 
-        ~FsyncRequest() {
-            delete header;
+        void be_header_owner() {
+            m_owner_flag &= 1;
         }
+
+    private:
+        uint8_t m_owner_flag{}; // 1: header
     };
-    struct CloseRequest {
-        bool is_owner{};
-        CloseHeader *header;
+    struct CloseRequest: public Noncopyable  {
+        CloseHeader *header{};
+        ~CloseRequest() {
+            if (m_owner_flag & 1) {
+                delete header;
+            }
+        }
+
+        size_t size() const {
+            return sizeof(CloseHeader);
+        }
         size_t estimated_resp_size() const {
             return sizeof(RingBufferResponse::CloseHeader);
         }
 
-        ~CloseRequest() {
-            delete header;
+        void be_header_owner() {
+            m_owner_flag &= 1;
         }
+
+    private:
+        uint8_t m_owner_flag{}; // 1: header
     };
-    using Variant = std::variant<OpenRequest, ReadRequest, WriteRequest, FsyncRequest, CloseRequest>;
+    // 引入所有权机制，只有不需要时才进行析构
+    using Variant = std::variant<std::unique_ptr<OpenRequest>, std::unique_ptr<ReadRequest>, std::unique_ptr<WriteRequest>,
+        std::unique_ptr<FsyncRequest>, std::unique_ptr<CloseRequest>>;
+    template<typename ReqType>
+    static std::unique_ptr<ReqType> get_req_ptr(Variant& variant) {
+        return std::move(std::get<std::unique_ptr<ReqType>>(variant));
+    }
 
     static bool write_open_request(RingBuffer &rb, size_t req_id, const std::string_view &filename, uint32_t open_flags) {
         if (rb.free_size() < sizeof(OpenHeader) + filename.size()) {
@@ -430,7 +543,8 @@ struct RingBufferRequest {
         return true;
     }
 
-    static bool write_write_request(RingBuffer &rb, size_t req_id, size_t file_id, const ConstBytesView &content) {
+    static bool write_write_request(RingBuffer &rb, size_t req_id, size_t file_id, size_t offset,
+        const ConstBytesView &content) {
         if (rb.free_size() < sizeof(WriteHeader) + content.size()) {
             return false;
         }
@@ -438,6 +552,7 @@ struct RingBufferRequest {
         header.type = Type::WRITE;
         header.req_id = req_id;
         header.file_id = file_id;
+        header.offset = offset;
         header.write_size = content.size();
         rb.write({(const char *)&header, sizeof(header)});
         rb.write(content);
@@ -483,67 +598,50 @@ struct RingBufferRequest {
     }
 
     static Variant read(RingBuffer::View &src) {
-        Type req_type{};
-        {
-            auto copy = src;
-            auto common_header = copy.cut(sizeof(CommonHeader));
-            if (common_header.second_part()) {
-                auto merged_common_header = common_header.merge();
-                req_type = ((CommonHeader *)merged_common_header.data())->type;
-            } else {
-                req_type = ((CommonHeader *)common_header.first_part().data())->type;
-            }
-        }
+        Type req_type = read_req_type(src);
 
         switch (req_type) {
             case Type::OPEN: {
-                OpenRequest req;
-                ref_or_copy_req_header(src, req);
-                auto filename_rb_slice = src.cut(req.header->filename_size);
+                auto req = std::make_unique<OpenRequest>();
+                ref_or_copy_req_header(src, *req);
+                auto filename_rb_slice = src.cut(req->header->filename_size);
                 if (filename_rb_slice.second_part()) {
-                    req.filename = new char[filename_rb_slice.size()];
-                    filename_rb_slice.merge({req.filename, filename_rb_slice.size()});
+                    req->filename = new char[filename_rb_slice.size()];
+                    filename_rb_slice.merge({req->filename, filename_rb_slice.size()});
+                    req->be_filename_owner();
                 } else {
-                    req.filename = filename_rb_slice.first_part().data();
+                    req->filename = filename_rb_slice.first_part().data();
                 }
                 return req;
             }
             case Type::READ: {
-                ReadRequest req;
-                ref_or_copy_req_header(src, req);
+                auto req = std::make_unique<ReadRequest>();
+                ref_or_copy_req_header(src, *req);
                 return req;
             }
             case Type::WRITE: {
-                WriteRequest req;
-                ref_or_copy_req_header(src, req);
-                req.content = src.cut(req.header->write_size);
+                auto req = std::make_unique<WriteRequest>();
+                ref_or_copy_req_header(src, *req);
+                req->content = src.cut(req->header->write_size);
                 return req;
             }
             case Type::FSYNC: {
-                FsyncRequest req;
-                ref_or_copy_req_header(src, req);
+                auto req = std::make_unique<FsyncRequest>();
+                ref_or_copy_req_header(src, *req);
                 return req;
             }
             case Type::CLOSE: {
-                CloseRequest req;
-                ref_or_copy_req_header(src, req);
+                auto req = std::make_unique<CloseRequest>();
+                ref_or_copy_req_header(src, *req);
                 return req;
             }
+            default:
+                throw_with("unsupported type");
         }
     }
 
     static RingBuffer::View read_view(RingBuffer::View &src) {
-        Type req_type{};
-        {
-            auto copy = src;
-            auto common_header = copy.cut(sizeof(CommonHeader));
-            if (common_header.second_part()) {
-                auto merged_common_header = common_header.merge();
-                req_type = ((CommonHeader *)merged_common_header.data())->type;
-            } else {
-                req_type = ((CommonHeader *)common_header.first_part().data())->type;
-            }
-        }
+        Type req_type = read_req_type(src);
 
         switch (req_type) {
             case Type::OPEN: {
@@ -571,6 +669,18 @@ struct RingBufferRequest {
     }
 
 private:
+    static Type read_req_type(RingBuffer::View src) {
+        Type req_type{};
+        auto common_header = src.cut(sizeof(CommonHeader));
+        if (common_header.second_part()) {
+            auto merged_common_header = common_header.merge();
+            req_type = ((CommonHeader *)merged_common_header.data())->type;
+        } else {
+            req_type = ((CommonHeader *)common_header.first_part().data())->type;
+        }
+        return req_type;
+    }
+
     template<class Request>
     static void ref_or_copy_req_header(RingBuffer::View &src, Request &req) {
         using Header =  std::remove_reference_t<decltype(*req.header)>;
@@ -579,10 +689,9 @@ private:
         if (header_rb_slice.second_part()) {
             stream = new char[header_rb_slice.size()];
             header_rb_slice.merge({stream, header_rb_slice.size()});
-            req.is_owner = true;
+            req.be_header_owner();
         } else {
             stream = header_rb_slice.first_part().data();
-            req.is_owner = false;
         }
         req.header = (Header *)stream;
     }
@@ -613,3 +722,4 @@ struct D2HRbMetaMsg {
         size_t host_resp_rb_tail;
     } payload;
 };
+}

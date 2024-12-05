@@ -7,7 +7,6 @@
 #include <cassert>
 #include <cstring>
 #include <functional>
-#include <iostream>
 #include <optional>
 #include <stdexcept>
 
@@ -32,9 +31,9 @@ public:
         }
 
         Slice cut(size_t n) {
-            assert(n < size());
+            assert(n <= size());
 
-            if (n < m_first_part.size) {
+            if (n <= m_first_part.size) {
                 return Slice(m_first_part.shrink_forward(n));
             }
             auto second_part_cut_size = n - m_first_part.size;
@@ -173,9 +172,9 @@ public:
         }
 
         View cut(size_t n) {
-            assert(n < size());
+            assert(n <= size());
 
-            if (n < m_first_part.size()) {
+            if (n <= m_first_part.size()) {
                 auto ret = m_first_part.subspan(0, n);
                 m_first_part = m_first_part.subspan(n, m_first_part.size());
                 return View(ret);
@@ -188,6 +187,22 @@ public:
             m_first_part = m_second_part->subspan(second_part_cut_size, m_second_part->size());
             m_second_part = std::nullopt;
             return ret;
+        }
+
+        // 可以搭配 reserve_space() 使用
+        bool write(const ConstBytesView &src) {
+            if (size() < src.size()) {
+                return false;
+            }
+
+            if (m_first_part.size() <= src.size()) {
+                std::memcpy(m_first_part.data(), src.data(), src.size());
+            } else {
+                std::memcpy(m_first_part.data(), src.data(), m_first_part.size());
+                auto residual = src.subspan(m_first_part.size());
+                std::memcpy(m_second_part->data(), residual.data(), residual.size());
+            }
+            return true;
         }
 
     private:
@@ -230,9 +245,9 @@ public:
         }
 
         ConstView cut(size_t n) {
-            assert(n < size());
+            assert(n <= size());
 
-            if (n < m_first_part.size()) {
+            if (n <= m_first_part.size()) {
                 auto ret = m_first_part.subspan(0, n);
                 m_first_part = m_first_part.subspan(n, m_first_part.size());
                 return ConstView(ret);
@@ -290,7 +305,7 @@ public:
     }
 
     View reserve_space(size_t n) {
-        if (n > free_size()) {
+        if (free_size() < n) {
             throw std::out_of_range("out of ring buffer free space");
         }
         return view(*m_rep.write(n));
@@ -337,7 +352,7 @@ public:
     }
 
     size_t free_size() const noexcept {
-        return m_rep.size();
+        return m_rep.free_size();
     }
 
     size_t empty() const noexcept {

@@ -1,5 +1,4 @@
 #include <cstdlib>
-#include <string>
 #include <string_view>
 
 #include "bytes.h"
@@ -68,7 +67,7 @@ bool write_rb_req(RingBuffer &rb, RingBufferRequest::Type rb_req_type) {
 }
 
 template<typename Req>
-void test_rb_req(Req req) {
+void test_rb_req(const Req &req) {
     using RbReq = RingBufferRequest;
     using ReqTy = RbReq::Type;
     if constexpr (std::is_same_v<Req, RbReq::OpenRequest>) {
@@ -111,50 +110,45 @@ TEST(FormatTest, RingBufferRequest) {
                 write_rb_req(rb, ReqTy::WRITE);
                 auto full_view = rb.to_view();
                 auto req = RbReq::read(full_view);
-                auto write_req = std::get<RbReq::WriteRequest>(req);
-                write_req.defer_clean();
-                test_rb_req(write_req);
-                rb.read(write_req.size());
+                auto write_req = RbReq::get_req_ptr<RbReq::WriteRequest>(req);
+                test_rb_req(*write_req);
+                rb.read(write_req->size());
                 break;
             }
             case 1: {
                 write_rb_req(rb, ReqTy::READ);
                 auto full_view = rb.to_view();
                 auto req = RbReq::read(full_view);
-                auto read_req = std::get<RbReq::ReadRequest>(req);
-                read_req.defer_clean();
-                test_rb_req(read_req);
-                rb.read(read_req.size());
+                auto read_req = RbReq::get_req_ptr<RbReq::ReadRequest>(req);
+                test_rb_req(*read_req);
+                rb.read(read_req->size());
                 break;
             }
             case 2: {
                 write_rb_req(rb, ReqTy::FSYNC);
                 auto full_view = rb.to_view();
                 auto req = RbReq::read(full_view);
-                auto fsync_req = std::get<RbReq::FsyncRequest>(req);
-                fsync_req.defer_clean();
-                test_rb_req(fsync_req);
-                rb.read(fsync_req.size());
+                auto fsync_req = RbReq::get_req_ptr<RbReq::FsyncRequest>(req);
+                test_rb_req(*fsync_req);
+                rb.read(fsync_req->size());
                 break;
             }
             case 3: {
                 write_rb_req(rb, ReqTy::OPEN);
                 auto full_view = rb.to_view();
                 auto req = RbReq::read(full_view);
-                auto open_req = std::get<RbReq::OpenRequest>(req);
-                open_req.defer_clean();
-                test_rb_req(open_req);
-                rb.read(open_req.size());
+                auto open_req = RbReq::get_req_ptr<RbReq::OpenRequest>(req);
+                test_rb_req(*open_req);
+                rb.read(open_req->size());
                 break;
             }
             case 4: {
                 write_rb_req(rb, ReqTy::CLOSE);
                 auto full_view = rb.to_view();
                 auto req = RbReq::read(full_view);
-                auto close_req = std::get<RbReq::CloseRequest>(req);
-                close_req.defer_clean();
-                test_rb_req(close_req);
-                rb.read(close_req.size());
+                auto close_req = RbReq::get_req_ptr<RbReq::CloseRequest>(req);
+                test_rb_req(*close_req);
+                rb.read(close_req->size());
                 break;
             }
         }

@@ -30,6 +30,7 @@ FrontendQp::FrontendQp(Frontend &frontend, size_t id,
 
 FrontendQp::~FrontendQp() {
     m_consumer->clean_sync();
+    m_producer->clean_sync();
 }
 
 void FrontendQp::post_open(const std::string_view &filename, uint32_t open_flags, OpenCallback callback) {

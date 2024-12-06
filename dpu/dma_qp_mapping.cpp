@@ -37,6 +37,10 @@ DmaQpMapping::DmaQpMapping(Backend &backend, IoCtx *io_ctx, MsgQueue &io_msg_que
     m_producer->start_sync();
 }
 
+DmaQpMapping::~DmaQpMapping() {
+    m_producer->clean_sync();
+}
+
 void DmaQpMapping::recv_h2d_rb_meta_msg(const ConstBytesView &raw_msg) {
     if (raw_msg.size() != sizeof(H2DRbMetaMsg)) {
         throw_with("wrong h2d msg size ");

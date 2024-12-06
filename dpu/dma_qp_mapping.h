@@ -49,6 +49,7 @@ public:
         char *host_req_mem_addr, size_t host_req_mem_size,
         size_t dpu_resp_rb_cap, ConstBytesView host_resp_mmap_desc,
         char *host_resp_mem_addr, size_t host_resp_mem_size);
+    ~DmaQpMapping();
 
 private:
     void recv_h2d_rb_meta_msg(const ConstBytesView &raw_msg);

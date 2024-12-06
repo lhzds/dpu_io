@@ -28,10 +28,6 @@ public:
         set_memcpy_cb(m_memcpy_ctx.make_pipeline_submitter());
     }
 
-    ~QueueDma() {
-        clean_sync();
-    }
-
     void post_memcpy(docacxx::Mmap &src_mmap, size_t src_offset, docacxx::Mmap &dst_mmap, 
         size_t dst_offset, size_t size, std::function<void()> cb) {
         if (size > cap().m_max_buf_size) {

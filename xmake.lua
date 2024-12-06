@@ -1,8 +1,8 @@
 add_rules("mode.debug", "mode.release")
 set_languages("c++20")
 
-add_requires("fmt", "spdlog")
-add_packages("fmt", "spdlog")
+add_requires("fmt", "spdlog", "boost")
+add_packages("fmt", "spdlog", "boost")
 
 function link_spdk(target)
     local spdk_root_dir = path.join(os.projectdir(), "deps/spdk/build")

@@ -8,7 +8,7 @@
 #include "fmt/format.h"
 #include "gtest/gtest.h"
 
-constexpr char DEV_PCI_ADDR[] = "cb:00.0";
+constexpr char DEV_PCI_ADDR[] = "b1:00.0";
 using namespace pulsedb;
 
 class QueueDmaTest: public testing::Test {

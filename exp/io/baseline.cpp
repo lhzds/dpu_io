@@ -10,7 +10,7 @@
 #include <unistd.h>
 
 #include "bytes.h"
-#include "io_constants.h"
+#include "config.h"
 #include "test_util/clock.h"
 #include "test_util/print_format.h"
 

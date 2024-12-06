@@ -3,7 +3,7 @@
 #include <doca_comch.h>
 #include <list>
 
-#include "backend.h"
+#include "comm/backend.h"
 #include "bytes.h"
 #include "docacxx/mem.h"
 #include "doca_wrapper/queue_dma.h"
@@ -44,7 +44,7 @@ public:
         RingBufferRep::Slice m_rb_slice;
     };
 
-    DmaQpMapping(Backend &backend, IoCtx *io_ctx,
+    DmaQpMapping(Backend &backend, IoCtx *io_ctx, MsgQueue &m_io_msg_queue,
         size_t dpu_req_rb_cap, ConstBytesView host_req_mmap_desc, 
         char *host_req_mem_addr, size_t host_req_mem_size,
         size_t dpu_resp_rb_cap, ConstBytesView host_resp_mmap_desc,
@@ -79,7 +79,8 @@ private:
     };
 
     QueueDma *m_dma{};
-    IoCtx *m_io_ctx{}; // IoCtx 指针，用于处理请求
+    IoCtx *m_io_ctx{};
+    MsgQueue &m_io_msg_queue;
 
     QueueData m_req_mapping;
     QueueData m_resp_mapping;

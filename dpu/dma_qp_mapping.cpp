@@ -16,11 +16,11 @@ DmaQpMapping::QueueData::QueueData(doca_dev *dev, size_t dpu_rb_cap,
     host_mmap = std::make_unique<docacxx::Mmap>(host_mmap_desc, dev, host_mem_addr, host_mem_size);
 }
 
-DmaQpMapping::DmaQpMapping(Backend &backend, IoCtx *io_ctx,
+DmaQpMapping::DmaQpMapping(Backend &backend, IoCtx *io_ctx, MsgQueue &io_msg_queue,
         size_t dpu_req_rb_cap, ConstBytesView host_req_mmap_desc, 
         char *host_req_mem_addr, size_t host_req_mem_size,
         size_t dpu_resp_rb_cap, ConstBytesView host_resp_mmap_desc,
-        char *host_resp_mem_addr, size_t host_resp_mem_size): m_dma(backend.dma()), m_io_ctx(io_ctx),
+        char *host_resp_mem_addr, size_t host_resp_mem_size): m_dma(backend.dma()), m_io_ctx(io_ctx), m_io_msg_queue(io_msg_queue),
     m_req_mapping(backend.dev(), dpu_req_rb_cap, host_req_mmap_desc, host_req_mem_addr, host_req_mem_size),
     m_resp_mapping(backend.dev(), dpu_resp_rb_cap, host_resp_mmap_desc, host_resp_mem_addr, host_resp_mem_size) {
     
@@ -194,7 +194,10 @@ void DmaQpMapping::process_req(RingBufferRequest::Type req_type, RingBufferReque
                 header.file_id = file_id;
                 auto ret = resp_view.write({(char *)&header, sizeof(header)});
                 assert(ret);
-                req_process_done_cb(req_msg, resp_msg);
+                auto io_msg = [&] {
+                    req_process_done_cb(req_msg, resp_msg);
+                };
+                while (not m_io_msg_queue.push(io_msg));
             });
             break;
         }
@@ -208,7 +211,10 @@ void DmaQpMapping::process_req(RingBufferRequest::Type req_type, RingBufferReque
                 header.req_id = req_id;
                 auto ret = resp_view.write({(char *)&header, sizeof(header)});
                 assert(ret);
-                req_process_done_cb(req_msg, resp_msg);
+                auto io_msg = [&] {
+                    req_process_done_cb(req_msg, resp_msg);
+                };
+                while (not m_io_msg_queue.push(io_msg));
             });
             break;
         }
@@ -232,7 +238,10 @@ void DmaQpMapping::process_req(RingBufferRequest::Type req_type, RingBufferReque
                 header.actual_read_size = read_size;
                 auto ret = header_view.write({(char *)&header, sizeof(header)});
                 assert(ret);
-                req_process_done_cb(req_msg, resp_msg);
+                auto io_msg = [&] {
+                    req_process_done_cb(req_msg, resp_msg);
+                };
+                while (not m_io_msg_queue.push(io_msg));
             });
             break;
         }
@@ -253,7 +262,10 @@ void DmaQpMapping::process_req(RingBufferRequest::Type req_type, RingBufferReque
                 header.error_code = error_code;
                 auto ret = resp_view.write({(char *)&header, sizeof(header)});
                 assert(ret);
-                req_process_done_cb(req_msg, resp_msg);
+                auto io_msg = [&] {
+                    req_process_done_cb(req_msg, resp_msg);
+                };
+                while (not m_io_msg_queue.push(io_msg));
             });
             break;
         }
@@ -267,7 +279,10 @@ void DmaQpMapping::process_req(RingBufferRequest::Type req_type, RingBufferReque
                 header.req_id = req_id;
                 auto ret = resp_view.write({(char *)&header, sizeof(header)});
                 assert(ret);
-                req_process_done_cb(req_msg, resp_msg);
+                auto io_msg = [&] {
+                    req_process_done_cb(req_msg, resp_msg);
+                };
+                while (not m_io_msg_queue.push(io_msg));
             });
             break;
         }

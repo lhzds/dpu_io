@@ -29,12 +29,13 @@ function link_spdk(target)
     target:add("ldflags", "-lnuma -lbsd", {force = true})
 end
 
-add_includedirs("common")
+add_includedirs("include")
 add_includedirs("deps/spdk/build/include")
 add_includedirs("deps/spdk/dpdk/build/include")
 
 includes("deps/docacxx/xmake.lua")
-includes("test/xmake.lua")
 includes("host/xmake.lua")
 includes("dpu/xmake.lua")
+
 includes("exp/xmake.lua")
+includes("test/xmake.lua")

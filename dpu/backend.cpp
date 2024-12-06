@@ -1,4 +1,4 @@
-#include "backend.h"
+#include "comm/backend.h"
 #include "bytes.h"
 #include "constant.h"
 #include "dma_qp_mapping.h"
@@ -6,6 +6,7 @@
 #include "format.h"
 #include "io/mem_io_mock.h"
 
+#include <doca_dev.h>
 #include <doca_pe.h>
 #include <memory>
 
@@ -55,7 +56,7 @@ Backend::Backend(const std::string_view &name, const std::string_view &dev_pci,
         auto *header = init_qp_msg.header;
         
         // 使用 1:1 大小的队列映射
-        m_qps.emplace_back(std::make_unique<DmaQpMapping>(*this, m_io_ctx.get(),
+        m_qps.emplace_back(std::make_unique<DmaQpMapping>(*this, m_io_ctx.get(), m_io_msg_queue,
             header->host_req_mem_size,
             ConstBytesView(init_qp_msg.host_req_mmap_desc, header->host_req_mmap_desc_size),
             header->host_req_mem_addr, header->host_req_mem_size,
@@ -64,6 +65,46 @@ Backend::Backend(const std::string_view &name, const std::string_view &dev_pci,
             ConstBytesView(init_qp_msg.host_resp_mmap_desc, header->host_resp_mmap_desc_size),
             header->host_resp_mem_addr, header->host_resp_mem_size
         ));
+    }
+
+    // 运行时只接受 exit 退出消息
+    m_ctrl_server->set_recv_cb([&](doca_comch_connection *conn, uint8_t *data, uint32_t len) {
+        CtrlMsg::Type msg_type;
+        ConstBytesView bytes((char *)data, len);
+        m_ctrl_msg_variant = CtrlMsg::read(bytes);
+        std::visit([&](const auto &msg) {
+            msg_type = msg.header->type;
+        }, *m_ctrl_msg_variant);
+        if (msg_type != CtrlMsg::Type::EXIT) {
+            throw_with("wrong msg type");
+        }
+        m_is_exited = true;
+    });
+}
+
+Backend::~Backend() {
+    m_qps.clear();
+    m_dma->clean_sync();
+    m_ctrl_server->clean_sync();
+    
+    if (auto result = doca_pe_destroy(m_pe); result != DOCA_SUCCESS) {
+        std::cerr << "failed to destroy pe: " << doca_error_get_descr(result) << std::endl;
+    }
+    if (auto result = doca_dev_rep_close(m_dev_rep); result != DOCA_SUCCESS) {
+        std::cerr << "failed to close dev rep: " << doca_error_get_descr(result) << std::endl;
+    }
+    if (auto result = doca_dev_close(m_dev); result != DOCA_SUCCESS) {
+        std::cerr << "failed to close dev: " << doca_error_get_descr(result) << std::endl;
+    }
+}
+
+void Backend::run() {
+    std::function<void()> msg;
+    while (not m_is_exited) {
+        doca_pe_progress(m_pe);
+        while (m_io_msg_queue.pop(msg)) {
+            msg();
+        }
     }
 }
 

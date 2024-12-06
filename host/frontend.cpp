@@ -7,7 +7,7 @@
 
 #include "bytes.h"
 #include "format.h"
-#include "frontend.h"
+#include "comm/frontend.h"
 
 namespace pulsedb {
 Frontend::Frontend(const std::string_view &backend_name, const std::string_view &dev_pci,
@@ -44,6 +44,12 @@ Frontend::Frontend(const std::string_view &backend_name, const std::string_view 
             qp.req_mmap_ref().export_pci(m_dev), qp.resp_mmap_ref().export_pci(m_dev));
         recv_ctrl_msg<CtrlMsg::AckMsg>();
     }
+}
+
+Frontend::~Frontend() {
+    m_qps.clear();
+    m_ctrl_client->clean_sync();
+    send_exit_msg();
 }
 
 template<class CtrlMsgType>
@@ -83,6 +89,10 @@ void Frontend::send_init_qp_msg(size_t qp_id,
         host_resp_mem_addr, host_resp_mem_size,
         req_export_desc, resp_export_desc);
     send_ctrl_msg(init_qp_msg);
+}
+
+void Frontend::send_exit_msg() {
+    send_ctrl_msg(CtrlMsg::make_exit_msg());
 }
 
 size_t Frontend::recv_new_conumser_id() {

@@ -25,6 +25,7 @@ public:
         char *host_req_mem_addr, size_t host_req_mem_size,
         char *host_resp_mem_addr, size_t host_resp_mem_size,
         const ConstBytesView &req_export_desc, const ConstBytesView &resp_export_desc);
+    void send_exit_msg();
     template<class CtrlMsgType> CtrlMsgType recv_ctrl_msg();
     size_t recv_new_conumser_id(); 
 

@@ -5,11 +5,13 @@
 #include <string_view>
 
 #include "bytes.h"
-#include "dma_qp_mapping.h"
+#include "constant.h"
+#include "../../../dpu/dma_qp_mapping.h"
 #include "doca_wrapper/queue_dma.h"
 #include "format.h"
 #include "io/io_ctx.h"
 #include "noncopyable.h"
+#include "types.h"
 
 namespace pulsedb {
 class DmaQpMapping;
@@ -25,7 +27,10 @@ public:
         const std::string_view &dev_rep_pci);
     ~Backend();
 
+    void run();
+
     void send_ack_msg();
+    void send_exit_msg();
     template<class CtrlMsgType> CtrlMsgType recv_ctrl_msg();
     size_t recv_new_conumser_id();
 
@@ -39,7 +44,9 @@ private:
     void send_ctrl_msg(const ConstBytesView &raw_msg);
 
     std::unique_ptr<IoCtx> m_io_ctx;
+    MsgQueue m_io_msg_queue;
 
+    bool m_is_exited{};
     doca_dev *m_dev{};
     doca_dev_rep *m_dev_rep{};
     doca_pe *m_pe{};

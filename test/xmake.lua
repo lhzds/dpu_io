@@ -15,3 +15,5 @@ target("format_test")
     set_kind("binary")
     add_files("format_test.cpp")
     add_packages("gtest")
+
+includes("comm_test/xmake.lua")

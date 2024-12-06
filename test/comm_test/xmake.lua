@@ -1,0 +1,10 @@
+target("backend_run")
+    set_kind("binary")
+    add_files("backend_run.cpp")
+    add_deps("docacxx", "backend")
+
+target("frontend_test")
+    set_kind("binary")
+    add_files("frontend_test.cpp")
+    add_packages("gtest")
+    add_deps("docacxx", "frontend")

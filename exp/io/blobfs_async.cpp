@@ -8,8 +8,8 @@
 #include <unistd.h>
 
 #include "bytes.h"
+#include "config.h"
 #include "io/blobfs.hpp"
-#include "io_constants.h"
 #include "test_util/clock.h"
 #include "test_util/print_format.h"
 

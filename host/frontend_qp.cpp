@@ -1,4 +1,4 @@
-#include "frontend_qp.h"
+#include "comm/frontend_qp.h"
 #include "bytes.h"
 #include "format.h"
 #include <doca_pe.h>
@@ -27,6 +27,10 @@ FrontendQp::FrontendQp(Frontend &frontend, size_t id,
         frontend.pe(), *m_dummy_consumer_mmap, frontend.dev(), docacxx::comch::Consumer::Cfg{1});
     m_consumer->start_sync();
 };
+
+FrontendQp::~FrontendQp() {
+    m_consumer->clean_sync();
+}
 
 void FrontendQp::post_open(const std::string_view &filename, uint32_t open_flags, OpenCallback callback) {
     post_request(RingBufferRequest::write_open_request, callback, filename, open_flags);

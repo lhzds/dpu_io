@@ -69,7 +69,7 @@ void Frontend::send_ctrl_msg(ConstBytesView raw_msg) {
     auto ret = m_ctrl_client->submit(std::move(task));
     while (ret) {
         doca_pe_progress(m_pe);
-        ret = m_ctrl_client->submit(std::move(task));
+        ret = m_ctrl_client->submit(std::move(ret));
     }
     while (not m_is_ctrl_msg_sended) {
         doca_pe_progress(m_pe);

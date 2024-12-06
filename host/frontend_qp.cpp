@@ -208,7 +208,7 @@ void FrontendQp::send_h2d_rb_meta_msg(const ConstBytesView &raw_msg) {
     auto ret = m_producer->submit(std::move(task));
     while (ret) {
         doca_pe_progress(m_pe);
-        ret = m_producer->submit(std::move(task));
+        ret = m_producer->submit(std::move(ret));
     }
     while (not m_is_h2d_rb_meta_msg_sended) {
         doca_pe_progress(m_pe);

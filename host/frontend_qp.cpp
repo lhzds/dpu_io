@@ -31,7 +31,7 @@ void FrontendQp::create_producer(Frontend &frontend) {
 }
 
 void FrontendQp::create_consumer(Frontend &frontend) {
-    m_dummy_consumer_mmap = std::make_unique<docacxx::Mmap>(frontend.dev(), nullptr, 0);
+    m_dummy_consumer_mmap = std::make_unique<docacxx::Mmap>(frontend.dev(), 1);
     m_consumer = std::make_unique<docacxx::comch::Consumer>(frontend.conn(), m_pe,
         frontend.pe(), *m_dummy_consumer_mmap, frontend.dev(), docacxx::comch::Consumer::Cfg{1});
     m_consumer->start_sync();

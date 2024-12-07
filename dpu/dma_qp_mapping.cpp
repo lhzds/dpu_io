@@ -30,10 +30,9 @@ DmaQpMapping::~DmaQpMapping() {
 
 void DmaQpMapping::create_consumer(Backend &backend) {
     m_consumer = std::make_unique<PassiveConsumer>(
-    backend.conn(), backend.pe(),
-    backend.pe(), backend.dev(),
-    PassiveConsumer::Cfg{1}, [&](const auto &raw_msg)
-        { recv_h2d_rb_meta_msg(raw_msg); });
+        backend.conn(), backend.pe(), backend.pe(), backend.dev(),
+        PassiveConsumer::Cfg{1}, [&](const auto &raw_msg)
+            { recv_h2d_rb_meta_msg(raw_msg); });
 }
 
 void DmaQpMapping::create_producer(Backend &backend) {

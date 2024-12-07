@@ -41,8 +41,8 @@ Frontend::Frontend(const std::string_view &backend_name, const std::string_view 
         m_qps.emplace_back(std::make_unique<FrontendQp>(*this, i, HOST_REQ_RB_CAP, HOST_RESP_RB_CAP));
         auto &qp = *m_qps.back();
 
-        send_init_qp_msg(i, qp.req_rb_ref().data(), qp.req_rb_ref().size(),
-            qp.resp_rb_ref().data(), qp.resp_rb_ref().size(),
+        send_init_qp_msg(i, qp.req_rb_ref().data(), qp.req_rb_ref().cap(),
+            qp.resp_rb_ref().data(), qp.resp_rb_ref().cap(),
             qp.req_mmap_ref().export_pci(m_dev), qp.resp_mmap_ref().export_pci(m_dev));
         recv_ctrl_msg<CtrlMsg::AckMsg>();
 
@@ -109,7 +109,8 @@ void Frontend::send_init_qp_msg(size_t qp_id,
         host_resp_mem_addr, host_resp_mem_size,
         req_export_desc, resp_export_desc);
     send_ctrl_msg(init_qp_msg);
-    SPDLOG_INFO("send init_qp msg[qp_id={}]", qp_id);
+    SPDLOG_INFO("send init_qp msg[qp_id={}, host_req_mem_size={}, host_resp_mem_size={}]",
+        qp_id, host_req_mem_size, host_resp_mem_size);
 }
 
 void Frontend::send_exit_msg() {

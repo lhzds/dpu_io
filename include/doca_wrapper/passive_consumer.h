@@ -13,8 +13,8 @@ public:
 
     PassiveConsumer(doca_comch_connection *peer_conn, doca_pe *pe, doca_pe *conn_pe, doca_dev *dev,
         const Cfg &cfg, ContextTaskCompleteCallback cb) {
-        // 收发立即数，无需用到 doca_buf，所以 mmap 的 size 设为 0
-        m_mmap = std::make_unique<docacxx::Mmap>(dev, nullptr, 0);
+        // 收发立即数，无需用到 doca_buf，所以 mmap 的 size 设为 1
+        m_mmap = std::make_unique<docacxx::Mmap>(dev, 1);
         m_consumer = std::make_unique<docacxx::comch::Consumer>(peer_conn, pe, conn_pe, *m_mmap, dev, cfg);
         // 完成解析消息，并自动提交新的 post_recv_task
         m_consumer->set_post_recv_cb([&, cb = std::move(cb)]

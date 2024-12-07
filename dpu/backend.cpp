@@ -9,6 +9,7 @@
 #include <doca_dev.h>
 #include <doca_pe.h>
 #include <memory>
+#include <spdlog/spdlog.h>
 
 namespace pulsedb {
 Backend::Backend(const std::string_view &name, const std::string_view &dev_pci,
@@ -66,6 +67,7 @@ Backend::Backend(const std::string_view &name, const std::string_view &dev_pci,
             header->host_resp_mem_addr, header->host_resp_mem_size
         ));
     }
+    spdlog::debug("create {} qps", qp_num);
 
     // 运行时只接受 exit 退出消息
     m_ctrl_server->set_recv_cb([&](doca_comch_connection *conn, uint8_t *data, uint32_t len) {
@@ -78,13 +80,14 @@ Backend::Backend(const std::string_view &name, const std::string_view &dev_pci,
         if (msg_type != CtrlMsg::Type::EXIT) {
             throw_with("wrong msg type");
         }
-        std::cout << "recv exit msg." << std::endl;
+        spdlog::debug("receive exit msg");
         m_is_exited = true;
     });
     send_start_comm_msg();
 }
 
 Backend::~Backend() {
+    spdlog::debug("backend start exiting");
     m_qps.clear();
     m_dma->clean_sync();
     m_ctrl_server->clean_sync();
@@ -118,6 +121,17 @@ CtrlMsgType Backend::recv_ctrl_msg() {
 
     auto ret = std::get<CtrlMsgType>(*m_ctrl_msg_variant);
     m_ctrl_msg_variant = std::nullopt;
+    if constexpr (std::is_same_v<CtrlMsgType, CtrlMsg::AckMsg>) {
+        spdlog::debug("receive ack msg");
+    } else if constexpr (std::is_same_v<CtrlMsgType, CtrlMsg::InitMsg>) {
+        spdlog::debug("receive init msg");
+    } else if constexpr (std::is_same_v<CtrlMsgType, CtrlMsg::InitQpMsg>) {
+        spdlog::debug("receive init_qp msg");
+    } else if constexpr (std::is_same_v<CtrlMsgType, CtrlMsg::ExitMsg>) {
+        spdlog::debug("receive exit msg");
+    } else if constexpr (std::is_same_v<CtrlMsgType, CtrlMsg::StartCommMsg>) {
+        spdlog::debug("receive start_comm msg");
+    }
     return ret;
 }
 
@@ -136,10 +150,12 @@ void Backend::send_ctrl_msg(const ConstBytesView &raw_msg) {
 
 void Backend::send_ack_msg() {
     send_ctrl_msg(CtrlMsg::make_ack_msg());
+    spdlog::debug("send ack msg");
 }
 
 void Backend::send_start_comm_msg() {
     send_ctrl_msg(CtrlMsg::make_start_comm_msg());
+    spdlog::debug("send start_comm msg");
 }
 
 size_t Backend::recv_new_conumser_id() {
@@ -148,6 +164,7 @@ size_t Backend::recv_new_conumser_id() {
     }
     auto ret = *m_new_consumer_id;
     m_new_consumer_id = std::nullopt;
+    spdlog::debug("receive new consumer id={}", *m_new_consumer_id);
     return ret;
 }
 }

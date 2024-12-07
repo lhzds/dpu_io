@@ -13,7 +13,14 @@ FrontendQp::FrontendQp(Frontend &frontend, size_t id,
         m_req_rb.cap(), DOCA_ACCESS_FLAG_PCI_READ_WRITE);
     m_resp_mmap = std::make_unique<docacxx::Mmap>(frontend.dev(), m_resp_rb.data(),
         m_resp_rb.cap(), DOCA_ACCESS_FLAG_PCI_READ_WRITE);
+};
 
+FrontendQp::~FrontendQp() {
+    m_consumer->clean_sync();
+    m_producer->clean_sync();
+}
+
+void FrontendQp::create_producer(Frontend &frontend) {
     size_t remote_consumer_id = frontend.recv_new_conumser_id();
     m_producer = std::make_unique<SpecializedProducer>(frontend.conn(), m_pe, frontend.dev(),
         SpecializedProducer::Cfg{1}, remote_consumer_id);
@@ -21,16 +28,13 @@ FrontendQp::FrontendQp(Frontend &frontend, size_t id,
         m_is_h2d_rb_meta_msg_sended = true;
     });
     m_producer->start_sync();
+}
 
+void FrontendQp::create_consumer(Frontend &frontend) {
     m_dummy_consumer_mmap = std::make_unique<docacxx::Mmap>(frontend.dev(), nullptr, 0);
     m_consumer = std::make_unique<docacxx::comch::Consumer>(frontend.conn(), m_pe,
         frontend.pe(), *m_dummy_consumer_mmap, frontend.dev(), docacxx::comch::Consumer::Cfg{1});
     m_consumer->start_sync();
-};
-
-FrontendQp::~FrontendQp() {
-    m_consumer->clean_sync();
-    m_producer->clean_sync();
 }
 
 void FrontendQp::post_open(const std::string_view &filename, uint32_t open_flags, OpenCallback callback) {

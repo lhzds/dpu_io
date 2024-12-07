@@ -1,6 +1,9 @@
 add_rules("mode.debug", "mode.release")
 set_languages("c++20")
 
+if is_mode("debug") then
+    add_defines("SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG")
+end
 add_requires("fmt 9.1.0", "spdlog", "boost")
 add_packages("fmt 9.1.0", "spdlog", "boost")
 

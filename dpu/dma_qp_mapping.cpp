@@ -22,23 +22,26 @@ DmaQpMapping::DmaQpMapping(Backend &backend, IoCtx *io_ctx, MsgQueue &io_msg_que
         size_t dpu_resp_rb_cap, ConstBytesView host_resp_mmap_desc,
         char *host_resp_mem_addr, size_t host_resp_mem_size): m_dma(backend.dma()), m_io_ctx(io_ctx), m_io_msg_queue(io_msg_queue),
     m_req_mapping(backend.dev(), dpu_req_rb_cap, host_req_mmap_desc, host_req_mem_addr, host_req_mem_size),
-    m_resp_mapping(backend.dev(), dpu_resp_rb_cap, host_resp_mmap_desc, host_resp_mem_addr, host_resp_mem_size) {
-    
-    m_consumer = std::make_unique<PassiveConsumer>(
-        backend.conn(), backend.pe(),
-        backend.pe(), backend.dev(),
-        PassiveConsumer::Cfg{1}, [&](const auto &raw_msg)
-            { recv_h2d_rb_meta_msg(raw_msg); });
+    m_resp_mapping(backend.dev(), dpu_resp_rb_cap, host_resp_mmap_desc, host_resp_mem_addr, host_resp_mem_size) {}
 
+DmaQpMapping::~DmaQpMapping() {
+    m_producer->clean_sync();
+}
+
+void DmaQpMapping::create_consumer(Backend &backend) {
+    m_consumer = std::make_unique<PassiveConsumer>(
+    backend.conn(), backend.pe(),
+    backend.pe(), backend.dev(),
+    PassiveConsumer::Cfg{1}, [&](const auto &raw_msg)
+        { recv_h2d_rb_meta_msg(raw_msg); });
+}
+
+void DmaQpMapping::create_producer(Backend &backend) {
     // 设计上同步传输，目前只需分配一个 task slot
     size_t remote_consumer_id = backend.recv_new_conumser_id();
     m_producer = std::make_unique<SpecializedProducer>(backend.conn(), backend.pe(), backend.dev(),
         SpecializedProducer::Cfg{1}, remote_consumer_id);
     m_producer->start_sync();
-}
-
-DmaQpMapping::~DmaQpMapping() {
-    m_producer->clean_sync();
 }
 
 void DmaQpMapping::recv_h2d_rb_meta_msg(const ConstBytesView &raw_msg) {

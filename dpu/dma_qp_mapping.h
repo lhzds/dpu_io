@@ -51,6 +51,9 @@ public:
         char *host_resp_mem_addr, size_t host_resp_mem_size);
     ~DmaQpMapping();
 
+    void create_consumer(Backend &backend);
+    void create_producer(Backend &backend);
+
 private:
     void recv_h2d_rb_meta_msg(const ConstBytesView &raw_msg);
     void submit_new_reqs(size_t host_req_new_tail);

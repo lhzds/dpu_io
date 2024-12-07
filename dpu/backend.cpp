@@ -14,6 +14,7 @@
 namespace pulsedb {
 Backend::Backend(const std::string_view &name, const std::string_view &dev_pci,
     const std::string_view &dev_rep_pci) {
+    SPDLOG_INFO("backend is starting...");
     m_io_ctx = std::make_unique<MemIoMock>();
 
     docacxx::check_derr(docacxx::open_doca_device_with_pci(dev_pci.data(), &m_dev),
@@ -66,8 +67,12 @@ Backend::Backend(const std::string_view &name, const std::string_view &dev_pci,
             ConstBytesView(init_qp_msg.host_resp_mmap_desc, header->host_resp_mmap_desc_size),
             header->host_resp_mem_addr, header->host_resp_mem_size
         ));
+
+        auto &qp = m_qps.back();
+        qp->create_consumer(*this);
+        qp->create_producer(*this);
     }
-    spdlog::debug("create {} qps", qp_num);
+    SPDLOG_INFO("create {} qps", qp_num);
 
     // 运行时只接受 exit 退出消息
     m_ctrl_server->set_recv_cb([&](doca_comch_connection *conn, uint8_t *data, uint32_t len) {
@@ -80,14 +85,14 @@ Backend::Backend(const std::string_view &name, const std::string_view &dev_pci,
         if (msg_type != CtrlMsg::Type::EXIT) {
             throw_with("wrong msg type");
         }
-        spdlog::debug("receive exit msg");
+        SPDLOG_INFO("receive exit msg");
         m_is_exited = true;
     });
     send_start_comm_msg();
 }
 
 Backend::~Backend() {
-    spdlog::debug("backend start exiting");
+    SPDLOG_INFO("backend start exiting");
     m_qps.clear();
     m_dma->clean_sync();
     m_ctrl_server->clean_sync();
@@ -122,15 +127,15 @@ CtrlMsgType Backend::recv_ctrl_msg() {
     auto ret = std::get<CtrlMsgType>(*m_ctrl_msg_variant);
     m_ctrl_msg_variant = std::nullopt;
     if constexpr (std::is_same_v<CtrlMsgType, CtrlMsg::AckMsg>) {
-        spdlog::debug("receive ack msg");
+        SPDLOG_INFO("receive ack msg");
     } else if constexpr (std::is_same_v<CtrlMsgType, CtrlMsg::InitMsg>) {
-        spdlog::debug("receive init msg");
+        SPDLOG_INFO("receive init msg");
     } else if constexpr (std::is_same_v<CtrlMsgType, CtrlMsg::InitQpMsg>) {
-        spdlog::debug("receive init_qp msg");
+        SPDLOG_INFO("receive init_qp msg");
     } else if constexpr (std::is_same_v<CtrlMsgType, CtrlMsg::ExitMsg>) {
-        spdlog::debug("receive exit msg");
+        SPDLOG_INFO("receive exit msg");
     } else if constexpr (std::is_same_v<CtrlMsgType, CtrlMsg::StartCommMsg>) {
-        spdlog::debug("receive start_comm msg");
+        SPDLOG_INFO("receive start_comm msg");
     }
     return ret;
 }
@@ -150,12 +155,12 @@ void Backend::send_ctrl_msg(const ConstBytesView &raw_msg) {
 
 void Backend::send_ack_msg() {
     send_ctrl_msg(CtrlMsg::make_ack_msg());
-    spdlog::debug("send ack msg");
+    SPDLOG_INFO("send ack msg");
 }
 
 void Backend::send_start_comm_msg() {
     send_ctrl_msg(CtrlMsg::make_start_comm_msg());
-    spdlog::debug("send start_comm msg");
+    SPDLOG_INFO("send start_comm msg");
 }
 
 size_t Backend::recv_new_conumser_id() {
@@ -164,7 +169,7 @@ size_t Backend::recv_new_conumser_id() {
     }
     auto ret = *m_new_consumer_id;
     m_new_consumer_id = std::nullopt;
-    spdlog::debug("receive new consumer id={}", *m_new_consumer_id);
+    SPDLOG_INFO("receive new consumer id={}", *m_new_consumer_id);
     return ret;
 }
 }

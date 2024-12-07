@@ -27,6 +27,9 @@ public:
     FrontendQp(Frontend &frontend, size_t id, size_t req_rb_cap, size_t resp_rb_cap);
     ~FrontendQp();
 
+    void create_producer(Frontend &frontend);
+    void create_consumer(Frontend &frontend);
+
     void post_open(const std::string_view &filename, uint32_t open_flags, OpenCallback callback);
     void post_close(size_t file_id, CloseCallback callback);
     void post_read(size_t file_id, size_t offset, size_t size, ReadCallback callback);

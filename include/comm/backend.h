@@ -29,6 +29,7 @@ public:
 
     void run();
 
+    void send_start_comm_msg();
     void send_ack_msg();
     void send_exit_msg();
     template<class CtrlMsgType> CtrlMsgType recv_ctrl_msg();

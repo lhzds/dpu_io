@@ -17,6 +17,7 @@ struct CtrlMsg {
     enum class Type {
         INIT,
         INIT_QP,
+        START_COMM,
         EXIT,
         ACK
     };
@@ -38,6 +39,7 @@ struct CtrlMsg {
         size_t host_req_mmap_desc_size{};
         size_t host_resp_mmap_desc_size{};
     };
+    struct StartCommHeader: CommonHeader {};
     struct ExitHeader: CommonHeader {};
     struct AckHeader: CommonHeader {};
 
@@ -49,13 +51,16 @@ struct CtrlMsg {
         const char *host_req_mmap_desc{};
         const char *host_resp_mmap_desc{};
     };
+    struct StartCommMsg {
+        StartCommHeader *header{};
+    };
     struct ExitMsg {
         ExitHeader *header{};
     };
     struct AckMsg {
         AckHeader *header{};
     };
-    using Variant = std::variant<InitMsg, InitQpMsg, ExitMsg, AckMsg>;
+    using Variant = std::variant<InitMsg, InitQpMsg, StartCommMsg, ExitMsg, AckMsg>;
 
     static BytesBuffer make_init_msg(size_t qp_num) {
         BytesBuffer msg(sizeof(InitHeader));
@@ -89,6 +94,13 @@ struct CtrlMsg {
         dst = dst.subspan(host_req_mmap_desc.size());
 
         std::memcpy(dst.data(), host_resp_mmap_desc.data(), host_resp_mmap_desc.size());
+        return msg;
+    }
+
+    static BytesBuffer make_start_comm_msg() {
+        BytesBuffer msg(sizeof(StartCommHeader));
+        auto *header = (StartCommHeader *)msg.data();
+        header->type = Type::START_COMM;
         return msg;
     }
 
@@ -143,6 +155,14 @@ struct CtrlMsg {
                 init_qp_msg.host_resp_mmap_desc = src.data();
                 return init_qp_msg;
             }
+            case Type::START_COMM: {
+                if (src.size() < sizeof(StartCommHeader)) {
+                    throw_with("wrong size to read start_comm msg");
+                }
+                StartCommMsg start_comm_msg;
+                start_comm_msg.header = (StartCommHeader *)src.data();
+                return start_comm_msg;
+            }      
             case Type::EXIT: {
                 if (src.size() < sizeof(ExitHeader)) {
                     throw_with("wrong size to read exit ctrl msg");

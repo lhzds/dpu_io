@@ -78,8 +78,10 @@ Backend::Backend(const std::string_view &name, const std::string_view &dev_pci,
         if (msg_type != CtrlMsg::Type::EXIT) {
             throw_with("wrong msg type");
         }
+        std::cout << "recv exit msg." << std::endl;
         m_is_exited = true;
     });
+    send_start_comm_msg();
 }
 
 Backend::~Backend() {
@@ -134,6 +136,10 @@ void Backend::send_ctrl_msg(const ConstBytesView &raw_msg) {
 
 void Backend::send_ack_msg() {
     send_ctrl_msg(CtrlMsg::make_ack_msg());
+}
+
+void Backend::send_start_comm_msg() {
+    send_ctrl_msg(CtrlMsg::make_start_comm_msg());
 }
 
 size_t Backend::recv_new_conumser_id() {

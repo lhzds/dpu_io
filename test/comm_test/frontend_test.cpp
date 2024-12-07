@@ -5,6 +5,6 @@
 using namespace pulsedb;
 
 int main() {
-    Frontend frontend(BACKEND_NAME, HOST_DEV_PCI, 0);
+    Frontend frontend(BACKEND_NAME, HOST_DEV_PCI, 1);
     return 0;
 }

@@ -38,18 +38,19 @@ Frontend::Frontend(const std::string_view &backend_name, const std::string_view 
     for (size_t i{}; i < qp_num; ++i) {
         m_qps.emplace_back(std::make_unique<FrontendQp>(*this, i, HOST_REQ_RB_CAP, HOST_RESP_RB_CAP));
         auto &qp = *m_qps.back();
-
+        
         send_init_qp_msg(i, qp.req_rb_ref().data(), qp.req_rb_ref().size(),
             qp.resp_rb_ref().data(), qp.resp_rb_ref().size(),
             qp.req_mmap_ref().export_pci(m_dev), qp.resp_mmap_ref().export_pci(m_dev));
         recv_ctrl_msg<CtrlMsg::AckMsg>();
     }
+    recv_ctrl_msg<CtrlMsg::StartCommMsg>();
 }
 
 Frontend::~Frontend() {
+    send_exit_msg();
     m_qps.clear();
     m_ctrl_client->clean_sync();
-    send_exit_msg();
 }
 
 template<class CtrlMsgType>

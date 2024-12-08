@@ -5,7 +5,6 @@
 #include <string_view>
 
 #include "bytes.h"
-#include "constant.h"
 #include "../../../dpu/dma_qp_mapping.h"
 #include "doca_wrapper/queue_dma.h"
 #include "format.h"

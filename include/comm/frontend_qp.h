@@ -6,9 +6,10 @@
 #include <memory>
 
 #include "bytes.h"
+#include "doca_wrapper/passive_consumer.h"
 #include "docacxx/ctx/consumer.h"
 #include "docacxx/mem.h"
-#include "doca_wrapper/specialized_producer.h"
+#include "doca_wrapper/single_task_producer.h"
 #include "frontend.h"
 #include "noncopyable.h"
 #include "ring_buffer.h"
@@ -53,7 +54,6 @@ private:
     void update_host_req_rb_head();
     void update_host_resp_rb_tail();
 
-    void send_h2d_rb_meta_msg(const ConstBytesView &raw_msg);
     void recv_d2h_rb_meta_msg(const ConstBytesView &raw_msg);
     size_t find_free_req_slot();
 
@@ -72,11 +72,10 @@ private:
     RingBuffer m_resp_rb;
     std::unique_ptr<docacxx::Mmap> m_req_mmap;
     std::unique_ptr<docacxx::Mmap> m_resp_mmap;
-    std::unique_ptr<SpecializedProducer> m_producer;
-    std::unique_ptr<docacxx::comch::Consumer> m_consumer;
-    std::unique_ptr<docacxx::Mmap> m_dummy_consumer_mmap;
+    std::unique_ptr<SingleTaskProducer> m_producer;
+    std::unique_ptr<PassiveConsumer> m_consumer;
 
-    // tmp var for callback
-    bool m_is_h2d_rb_meta_msg_sended{};
+    bool m_is_d2h_rb_meta_msg_recved{};
+    D2HRbMetaMsg m_d2h_rb_meta_msg{};
 };
 }

@@ -1,9 +1,7 @@
 #include "config.h"
+#include "doca_wrapper/passive_consumer.h"
 #include "docacxx/ctx/client.h"
-#include "docacxx/ctx/consumer.h"
-#include "doca_wrapper/specialized_producer.h"
 #include <doca_pe.h>
-#include <optional>
 
 using namespace docacxx;
 using namespace pulsedb;
@@ -15,38 +13,23 @@ int main() {
         "failed to open dev");
     check_derr(doca_pe_create(&pe), "failed to create pe");
 
-    comch::Client client(SERVER_NAME, dev, pe, comch::Client::Cfg{0});
-    std::optional<size_t> remote_consumer_id{};
-    client.set_new_consumer_cb([&](doca_comch_connection *,uint32_t id) {
-        remote_consumer_id = id;
-    });
+    comch::Client::Cfg client_cfg;
+    client_cfg.m_max_send_task_slot_num = 1;
+    comch::Client client(SERVER_NAME, dev, pe, client_cfg);
     client.start_sync();
     doca_comch_connection *conn = client.get_connection();
 
     // 创建 consumer
-    Mmap dummy_consumer_mmap(dev, 1);
-    comch::Consumer consumer(conn, pe, pe, dummy_consumer_mmap, dev, comch::Consumer::Cfg{1});
-    consumer.start_sync();
-
-    // 创建 producer
-    while (not remote_consumer_id) {
-        doca_pe_progress(pe);
-    }
-    SpecializedProducer producer(conn, pe, dev, SpecializedProducer::Cfg{1}, *remote_consumer_id);
-    producer.start_sync();
-
-    // 发送消息
-    std::string msg("hello, dpu!");
-    bool is_sended{};
-    auto task = producer.alloc_send_task((uint8_t *)msg.data(), msg.size(), [&](const auto &task) {
-        is_sended = true;
+    PassiveConsumer::Cfg consumer_cfg;
+    consumer_cfg.m_max_msg_size = 1024;
+    consumer_cfg.m_post_recv_task_slot_num = 1;
+    size_t is_recved{};
+    PassiveConsumer consumer(conn, pe, pe, dev, consumer_cfg, [&](const ConstBytesView &raw_msg) {
+        is_recved = true;
+        std::cout << std::string_view(raw_msg) << std::endl;
     });
-    task = producer.submit(std::move(task));
-    while (task) {
-        doca_pe_progress(pe);
-        task = producer.submit(std::move(task));
-    }
-    while (not is_sended) {
+
+    while (not is_recved) {
         doca_pe_progress(pe);
     }
 

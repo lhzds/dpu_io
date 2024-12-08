@@ -1,5 +1,7 @@
 #include "comm/frontend_qp.h"
 #include "bytes.h"
+#include "constant.h"
+#include "doca_wrapper/passive_consumer.h"
 #include "format.h"
 #include <doca_pe.h>
 
@@ -16,25 +18,25 @@ FrontendQp::FrontendQp(Frontend &frontend, size_t id,
 };
 
 FrontendQp::~FrontendQp() {
-    m_consumer->clean_sync();
     m_producer->clean_sync();
 }
 
 void FrontendQp::create_producer(Frontend &frontend) {
     size_t remote_consumer_id = frontend.recv_new_conumser_id();
-    m_producer = std::make_unique<SpecializedProducer>(frontend.conn(), m_pe, frontend.dev(),
-        SpecializedProducer::Cfg{1}, remote_consumer_id);
-    m_producer->set_send_cb([&](auto) {
-        m_is_h2d_rb_meta_msg_sended = true;
-    });
+    m_producer = std::make_unique<SingleTaskProducer>(frontend.conn(), m_pe, frontend.dev(),
+        COMM_RB_META_SIZE, remote_consumer_id);
     m_producer->start_sync();
 }
 
 void FrontendQp::create_consumer(Frontend &frontend) {
-    m_dummy_consumer_mmap = std::make_unique<docacxx::Mmap>(frontend.dev(), 1);
-    m_consumer = std::make_unique<docacxx::comch::Consumer>(frontend.conn(), m_pe,
-        frontend.pe(), *m_dummy_consumer_mmap, frontend.dev(), docacxx::comch::Consumer::Cfg{1});
-    m_consumer->start_sync();
+    PassiveConsumer::Cfg cfg;
+    cfg.m_max_msg_size = COMM_RB_META_SIZE;
+    cfg.m_post_recv_task_slot_num = 1;
+    m_consumer = std::make_unique<PassiveConsumer>(frontend.conn(), m_pe,
+        frontend.pe(), frontend.dev(), cfg, [&](const auto &view) {
+        m_is_d2h_rb_meta_msg_recved = true;
+        std::memcpy(&m_d2h_rb_meta_msg, view.data(), view.size());
+    });
 }
 
 void FrontendQp::post_open(const std::string_view &filename, uint32_t open_flags, OpenCallback callback) {
@@ -141,82 +143,55 @@ void FrontendQp::poll_wait(size_t n) {
 }
 
 void FrontendQp::send_host_req_rb_tail() {
-    H2DRbMetaMsg h2d_rb_meta_msg;
-    h2d_rb_meta_msg.type = H2DRbMetaMsg::Type::NEW_HOST_REQ_RB_TAIL;
-    h2d_rb_meta_msg.payload.new_host_req_rb_tail = m_req_rb.tail();
-    send_h2d_rb_meta_msg({(const char *)&h2d_rb_meta_msg, sizeof(h2d_rb_meta_msg)});
+    auto *h2d_rb_meta_msg = (H2DRbMetaMsg *)m_producer->buf_data();
+    h2d_rb_meta_msg->type = H2DRbMetaMsg::Type::NEW_HOST_REQ_RB_TAIL;
+    h2d_rb_meta_msg->payload.new_host_req_rb_tail = m_req_rb.tail();
+    m_producer->send_sync(sizeof(*h2d_rb_meta_msg));
 }
 
 void FrontendQp::send_host_resp_rb_head() {
-    H2DRbMetaMsg h2d_rb_meta_msg;
-    h2d_rb_meta_msg.type = H2DRbMetaMsg::Type::NEW_HOST_RESP_RB_HEAD;
-    h2d_rb_meta_msg.payload.new_host_resp_rb_head = m_resp_rb.head();
-    send_h2d_rb_meta_msg({(const char *)&h2d_rb_meta_msg, sizeof(h2d_rb_meta_msg)});
+    auto *h2d_rb_meta_msg = (H2DRbMetaMsg *)m_producer->buf_data();
+    h2d_rb_meta_msg->type = H2DRbMetaMsg::Type::NEW_HOST_RESP_RB_HEAD;
+    h2d_rb_meta_msg->payload.new_host_resp_rb_head = m_resp_rb.head();
+    m_producer->send_sync(sizeof(*h2d_rb_meta_msg));
 }
 
 void FrontendQp::update_host_req_rb_head() {
     // 提前 submit 一个 post_recv 任务，等待获取 req_rb_head
-    bool is_d2h_rb_meta_msg_recved{};
-    D2HRbMetaMsg d2h_rb_meta_msg;
-    auto post_recv_task = m_consumer->alloc_post_recv_task([&](const auto &task) {
-        is_d2h_rb_meta_msg_recved = true;
-        std::memcpy(&d2h_rb_meta_msg, task.imm_data(), task.imm_data_size());
-    });
-    auto ret = m_consumer->submit(std::move(post_recv_task));
-    assert(not ret);
+    m_is_d2h_rb_meta_msg_recved = false;
 
-    H2DRbMetaMsg h2d_rb_meta_msg;
-    h2d_rb_meta_msg.type = H2DRbMetaMsg::Type::REQUIRE_HOST_REQ_RB_HEAD;
-    h2d_rb_meta_msg.payload.host_req_rb_head = m_req_rb.head();
-    send_h2d_rb_meta_msg({(const char *)&h2d_rb_meta_msg, sizeof(h2d_rb_meta_msg)});
+    auto *h2d_rb_meta_msg = (H2DRbMetaMsg *)m_producer->buf_data();
+    h2d_rb_meta_msg->type = H2DRbMetaMsg::Type::REQUIRE_HOST_REQ_RB_HEAD;
+    h2d_rb_meta_msg->payload.host_req_rb_head = m_req_rb.head();
+    m_producer->send_sync(sizeof(*h2d_rb_meta_msg));
 
-    while (not is_d2h_rb_meta_msg_recved) {
+    while (not m_is_d2h_rb_meta_msg_recved) {
         doca_pe_progress(m_pe);
     }
-    if (d2h_rb_meta_msg.type != D2HRbMetaMsg::Type::NEW_HOST_REQ_RB_HEAD) {
+    if (m_d2h_rb_meta_msg.type != D2HRbMetaMsg::Type::NEW_HOST_REQ_RB_HEAD) {
         throw_with("wrong d2h_rb_meta_msg type");
     }
-    auto read_size = m_req_rb.len(m_req_rb.head(), d2h_rb_meta_msg.payload.host_req_rb_head);
+    auto read_size = m_req_rb.len(m_req_rb.head(), m_d2h_rb_meta_msg.payload.host_req_rb_head);
     m_req_rb.read(read_size);
 }
 
 void FrontendQp::update_host_resp_rb_tail() {
     // 提前 submit 一个 post_recv 任务，等待获取 req_rb_head
-    bool is_d2h_rb_meta_msg_recved{};
-    D2HRbMetaMsg d2h_rb_meta_msg;
-    auto post_recv_task = m_consumer->alloc_post_recv_task([&](const auto &task) {
-        is_d2h_rb_meta_msg_recved = true;
-        std::memcpy(&d2h_rb_meta_msg, task.imm_data(), task.imm_data_size());
-    });
-    auto ret = m_consumer->submit(std::move(post_recv_task));
-    assert(not ret);
+    m_is_d2h_rb_meta_msg_recved = false;
 
-    H2DRbMetaMsg h2d_rb_meta_msg;
-    h2d_rb_meta_msg.type = H2DRbMetaMsg::Type::REQUIRE_HOST_RESP_RB_TAIL;
-    h2d_rb_meta_msg.payload.host_resp_rb_tail = m_resp_rb.tail();
-    send_h2d_rb_meta_msg({(const char *)&h2d_rb_meta_msg, sizeof(h2d_rb_meta_msg)});
+    auto *h2d_rb_meta_msg = (H2DRbMetaMsg *)m_producer->buf_data();
+    h2d_rb_meta_msg->type = H2DRbMetaMsg::Type::REQUIRE_HOST_RESP_RB_TAIL;
+    h2d_rb_meta_msg->payload.host_resp_rb_tail = m_resp_rb.tail();
+    m_producer->send_sync(sizeof(*h2d_rb_meta_msg));
 
-    while (not is_d2h_rb_meta_msg_recved) {
+    while (not m_is_d2h_rb_meta_msg_recved) {
         doca_pe_progress(m_pe);
     }
-    if (d2h_rb_meta_msg.type != D2HRbMetaMsg::Type::NEW_HOST_RESP_RB_TAIL) {
+    if (m_d2h_rb_meta_msg.type != D2HRbMetaMsg::Type::NEW_HOST_RESP_RB_TAIL) {
         throw_with("wrong d2h_rb_meta_msg type");
     }
-    auto write_size = m_resp_rb.len(m_resp_rb.tail(), d2h_rb_meta_msg.payload.host_resp_rb_tail);
+    auto write_size = m_resp_rb.len(m_resp_rb.tail(), m_d2h_rb_meta_msg.payload.host_resp_rb_tail);
     m_resp_rb.rep().write(write_size);
-}
-
-void FrontendQp::send_h2d_rb_meta_msg(const ConstBytesView &raw_msg) {
-    m_is_h2d_rb_meta_msg_sended = false;
-    auto task = m_producer->alloc_send_task((uint8_t *)raw_msg.data(), raw_msg.size(), nullptr);
-    auto ret = m_producer->submit(std::move(task));
-    while (ret) {
-        doca_pe_progress(m_pe);
-        ret = m_producer->submit(std::move(ret));
-    }
-    while (not m_is_h2d_rb_meta_msg_sended) {
-        doca_pe_progress(m_pe);
-    }
 }
 
 size_t FrontendQp::find_free_req_slot() {

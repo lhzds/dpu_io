@@ -3,6 +3,8 @@
 
 #include "dma_qp_mapping.h"
 #include "bytes.h"
+#include "constant.h"
+#include "doca_wrapper/passive_consumer.h"
 #include "doca_wrapper/queue_dma.h"
 #include "format.h"
 #include "ring_buffer.h"
@@ -29,17 +31,17 @@ DmaQpMapping::~DmaQpMapping() {
 }
 
 void DmaQpMapping::create_consumer(Backend &backend) {
-    m_consumer = std::make_unique<PassiveConsumer>(
-        backend.conn(), backend.pe(), backend.pe(), backend.dev(),
-        PassiveConsumer::Cfg{1}, [&](const auto &raw_msg)
-            { recv_h2d_rb_meta_msg(raw_msg); });
+    PassiveConsumer::Cfg cfg;
+    cfg.m_post_recv_task_slot_num = 1; // 设计上同步传输，目前只需分配一个 task slot
+    cfg.m_max_msg_size = COMM_RB_META_SIZE;
+    m_consumer = std::make_unique<PassiveConsumer>(backend.conn(), backend.pe(), backend.pe(),
+        backend.dev(), cfg, [&](const auto &raw_msg) { recv_h2d_rb_meta_msg(raw_msg); });
 }
 
 void DmaQpMapping::create_producer(Backend &backend) {
-    // 设计上同步传输，目前只需分配一个 task slot
     size_t remote_consumer_id = backend.recv_new_conumser_id();
-    m_producer = std::make_unique<SpecializedProducer>(backend.conn(), backend.pe(), backend.dev(),
-        SpecializedProducer::Cfg{1}, remote_consumer_id);
+    m_producer = std::make_unique<SingleTaskProducer>(backend.conn(), backend.pe(), backend.dev(),
+        COMM_RB_META_SIZE, remote_consumer_id);
     m_producer->start_sync();
 }
 
@@ -200,6 +202,7 @@ void DmaQpMapping::process_req(RingBufferRequest::Type req_type, RingBufferReque
                 header.file_id = file_id;
                 auto ret = resp_view.write({(char *)&header, sizeof(header)});
                 assert(ret);
+                // pe 等对象线性不安全，所以通过消息传递回主线程执行
                 auto io_msg = [&] {
                     req_process_done_cb(req_msg, resp_msg);
                 };
@@ -217,6 +220,7 @@ void DmaQpMapping::process_req(RingBufferRequest::Type req_type, RingBufferReque
                 header.req_id = req_id;
                 auto ret = resp_view.write({(char *)&header, sizeof(header)});
                 assert(ret);
+                // pe 等对象线性不安全，所以通过消息传递回主线程执行
                 auto io_msg = [&] {
                     req_process_done_cb(req_msg, resp_msg);
                 };
@@ -244,6 +248,7 @@ void DmaQpMapping::process_req(RingBufferRequest::Type req_type, RingBufferReque
                 header.actual_read_size = read_size;
                 auto ret = header_view.write({(char *)&header, sizeof(header)});
                 assert(ret);
+                // pe 等对象线性不安全，所以通过消息传递回主线程执行
                 auto io_msg = [&] {
                     req_process_done_cb(req_msg, resp_msg);
                 };
@@ -268,6 +273,7 @@ void DmaQpMapping::process_req(RingBufferRequest::Type req_type, RingBufferReque
                 header.error_code = error_code;
                 auto ret = resp_view.write({(char *)&header, sizeof(header)});
                 assert(ret);
+                // pe 等对象线性不安全，所以通过消息传递回主线程执行
                 auto io_msg = [&] {
                     req_process_done_cb(req_msg, resp_msg);
                 };
@@ -285,6 +291,7 @@ void DmaQpMapping::process_req(RingBufferRequest::Type req_type, RingBufferReque
                 header.req_id = req_id;
                 auto ret = resp_view.write({(char *)&header, sizeof(header)});
                 assert(ret);
+                // pe 等对象线性不安全，所以通过消息传递回主线程执行
                 auto io_msg = [&] {
                     req_process_done_cb(req_msg, resp_msg);
                 };
@@ -332,7 +339,6 @@ void DmaQpMapping::req_process_done_cb(Msg &req_msg, Msg &resp_msg) {
         auto host_resp_rb_slice = host_resp_rb_rep.write(resp_size);   
         assert(host_resp_rb_slice.has_value());     
         resp_msg.start_dma();
-        // TODO：这里属于使用另外的线程 submit 任务，但 pe 线性不安全
         m_dma->post_memcpyv(*dpu_resp_mmap, *host_resp_mmap,
             make_memcpy_segs(resp_msg.rb_slice(), *host_resp_rb_slice),
             [&] { resp_dma_done_cb(resp_msg); });
@@ -431,27 +437,20 @@ DmaQpMapping::make_memcpy_segs(RingBufferRep::Slice src, RingBufferRep::Slice ds
 }
 
 void DmaQpMapping::send_host_req_rb_head() {
-    // TODO: 大端/小端字节序？imm_data 的生命周期是否需要延长？
-    D2HRbMetaMsg d2h_rb_meta_msg;
-    d2h_rb_meta_msg.type = D2HRbMetaMsg::Type::NEW_HOST_REQ_RB_HEAD;
-    d2h_rb_meta_msg.payload.host_req_rb_head = m_req_mapping.host_rb_rep.head();
-    send_d2h_rb_meta_msg({(const char *)&d2h_rb_meta_msg, sizeof(d2h_rb_meta_msg)});
+    // 大端/小端字节序？
+    auto *d2h_rb_meta_msg = (D2HRbMetaMsg *)m_producer->buf_data();
+    d2h_rb_meta_msg->type = D2HRbMetaMsg::Type::NEW_HOST_REQ_RB_HEAD;
+    d2h_rb_meta_msg->payload.host_req_rb_head = m_req_mapping.host_rb_rep.head();
+    m_producer->try_submit_send_task(sizeof(*d2h_rb_meta_msg));
     m_need_host_req_rb_head = false;
 }
 
 void DmaQpMapping::send_host_resp_rb_tail() {
-    // TODO: 大端/小端字节序？imm_data 的生命周期是否需要延长？
-    D2HRbMetaMsg d2h_rb_meta_msg;
-    d2h_rb_meta_msg.type = D2HRbMetaMsg::Type::NEW_HOST_RESP_RB_TAIL;
-    d2h_rb_meta_msg.payload.host_resp_rb_tail = m_host_resp_rb_dma_done_tail;
-    send_d2h_rb_meta_msg({(const char *)&d2h_rb_meta_msg, sizeof(d2h_rb_meta_msg)});
+    // 大端/小端字节序？
+    auto *d2h_rb_meta_msg = (D2HRbMetaMsg *)m_producer->buf_data();
+    d2h_rb_meta_msg->type = D2HRbMetaMsg::Type::NEW_HOST_RESP_RB_TAIL;
+    d2h_rb_meta_msg->payload.host_resp_rb_tail = m_host_resp_rb_dma_done_tail;
+    m_producer->try_submit_send_task(sizeof(*d2h_rb_meta_msg));
     m_need_host_resp_rb_tail = false;
-}
-
-void DmaQpMapping::send_d2h_rb_meta_msg(const ConstBytesView &raw_msg) {
-    auto task = m_producer->alloc_send_task((uint8_t *)raw_msg.data(), raw_msg.size(), nullptr);
-    auto ret = m_producer->submit(std::move(task));
-    // 不用循环提交，因为 FrontendQp 已经提前提交了一个 post_recv 任务
-    assert(not ret);
 }
 } // namespace pulsedb

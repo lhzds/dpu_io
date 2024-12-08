@@ -7,7 +7,7 @@
 #include "bytes.h"
 #include "docacxx/mem.h"
 #include "doca_wrapper/queue_dma.h"
-#include "doca_wrapper/specialized_producer.h"
+#include "doca_wrapper/single_task_producer.h"
 #include "doca_wrapper/passive_consumer.h"
 #include "format.h"
 #include "io/io_ctx.h"
@@ -66,7 +66,6 @@ private:
     std::vector<QueueDma::MemcpySeg> make_memcpy_segs(RingBufferRep::Slice src, RingBufferRep::Slice dst);
     void send_host_req_rb_head();
     void send_host_resp_rb_tail();
-    void send_d2h_rb_meta_msg(const ConstBytesView &raw_msg);
 
     struct QueueData {
         QueueData(doca_dev *dev, size_t dpu_rb_size, ConstBytesView host_mmap_desc,
@@ -91,7 +90,7 @@ private:
     size_t m_host_resp_rb_dma_done_tail{};
 
     std::unique_ptr<PassiveConsumer> m_consumer;
-    std::unique_ptr<SpecializedProducer> m_producer;
+    std::unique_ptr<SingleTaskProducer> m_producer;
     bool m_need_host_req_rb_head{};
     bool m_need_host_resp_rb_tail{};
     EventQueue m_resp_dma_wait_queue{};

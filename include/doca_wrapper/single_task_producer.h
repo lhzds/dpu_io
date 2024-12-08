@@ -13,14 +13,13 @@ public:
         :Producer(peer_conn, pe, dev, Cfg{1}) {
         m_buf_inv = std::make_unique<docacxx::BufInventoryWithMmap>(dev, buf_size, 1);
         m_buf = m_buf_inv->get_buf(size_t(0), buf_size);
-        m_task = alloc_send_task(*m_buf, consumer_id, nullptr);
 
         Producer::set_send_cb([&](std::unique_ptr<Producer::SendTask> task) {
             m_is_sended = true;
             m_send_cb();
             m_task = std::move(task);
         });
-        Producer::set_send_cb([&](std::unique_ptr<Producer::SendTask> task) {
+        Producer::set_send_error_cb([&](std::unique_ptr<Producer::SendTask> task) {
             m_send_error_cb();
             m_task = std::move(task);
         });
@@ -36,6 +35,10 @@ public:
 
     bool try_submit_send_task(size_t buf_valid_size) {
         assert(buf_valid_size <= m_buf->size());
+        if (not m_task) {
+            m_task = alloc_send_task(*m_buf, m_consumer_id, nullptr);
+        }
+
         m_is_sended = false;
         m_buf->set_doca_buf_data(buf_valid_size);
         m_task = submit(std::move(m_task));
@@ -44,6 +47,10 @@ public:
 
     void submit_send_task_sync(size_t buf_valid_size) {
         assert(buf_valid_size <= m_buf->size());
+        if (not m_task) {
+            m_task = alloc_send_task(*m_buf, m_consumer_id, nullptr);
+        }
+    
         m_is_sended = false;
         m_buf->set_doca_buf_data(buf_valid_size);
         while ((m_task = submit(std::move(m_task)))) {
@@ -75,6 +82,7 @@ private:
     std::unique_ptr<docacxx::Buffer> m_buf;
     std::unique_ptr<docacxx::BufInventoryWithMmap> m_buf_inv;
     std::unique_ptr<Producer::SendTask> m_task;
+    size_t m_consumer_id{};
 
     std::function<void()> m_send_cb;
     std::function<void()> m_send_error_cb {[] { throw_with("send_error");}};

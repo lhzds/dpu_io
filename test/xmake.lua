@@ -16,4 +16,5 @@ target("format_test")
     add_files("format_test.cpp")
     add_packages("gtest")
 
-includes("comm_test/xmake.lua")
+includes("comm/xmake.lua")
+includes("producer_consumer/xmake.lua")

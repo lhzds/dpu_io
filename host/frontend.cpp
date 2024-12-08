@@ -58,6 +58,13 @@ Frontend::~Frontend() {
     send_exit_msg();
     m_qps.clear();
     m_ctrl_client->clean_sync();
+
+    if (auto result = doca_pe_destroy(m_pe); result != DOCA_SUCCESS) {
+        std::cerr << "failed to destroy pe: " << doca_error_get_descr(result) << std::endl;
+    }
+    if (auto result = doca_dev_close(m_dev); result != DOCA_SUCCESS) {
+        std::cerr << "failed to close dev: " << doca_error_get_descr(result) << std::endl;
+    }
 }
 
 template<class CtrlMsgType>

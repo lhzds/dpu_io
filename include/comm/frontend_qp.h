@@ -18,11 +18,11 @@ class Frontend;
 
 class FrontendQp: Noncopyable {
 public:
-    using OpenCallback = std::function<void(int32_t, size_t file_id)>;
-    using CloseCallback = std::function<void(int32_t)>;
-    using ReadCallback = std::function<void(int32_t, std::optional<RingBuffer::View>)>;
-    using WriteCallback = std::function<void(int32_t)>;
-    using FsyncCallback = std::function<void(int32_t)>;
+    using OpenCallback = std::function<void(int32_t error_code, size_t file_id)>;
+    using CloseCallback = std::function<void(int32_t error_code)>;
+    using ReadCallback = std::function<void(int32_t error_code, std::optional<RingBuffer::View> content)>;
+    using WriteCallback = std::function<void(int32_t error_code)>;
+    using FsyncCallback = std::function<void(int32_t error_code)>;
 
     FrontendQp(Frontend &frontend, size_t id, size_t req_rb_cap, size_t resp_rb_cap);
     ~FrontendQp();

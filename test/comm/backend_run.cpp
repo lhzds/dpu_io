@@ -5,7 +5,6 @@ using namespace pulsedb;
 
 int main() {
     Backend backend(BACKEND_NAME, DPU_DEV_PCI, DPU_DEV_REP_PCI);
-    std::cout << "Backend is started." << std::endl;
     backend.run();
     return 0;
 }

@@ -18,13 +18,15 @@ DmaQpMapping::QueueData::QueueData(doca_dev *dev, size_t dpu_rb_cap,
     host_mmap = std::make_unique<docacxx::Mmap>(host_mmap_desc, dev, host_mem_addr, host_mem_size);
 }
 
-DmaQpMapping::DmaQpMapping(Backend &backend, IoCtx *io_ctx, MsgQueue &io_msg_queue,
+DmaQpMapping::DmaQpMapping(Backend &backend, size_t id, IoCtx *io_ctx, MsgQueue &io_msg_queue,
         size_t dpu_req_rb_cap, ConstBytesView host_req_mmap_desc, 
         char *host_req_mem_addr, size_t host_req_mem_size,
         size_t dpu_resp_rb_cap, ConstBytesView host_resp_mmap_desc,
         char *host_resp_mem_addr, size_t host_resp_mem_size): m_dma(backend.dma()), m_io_ctx(io_ctx), m_io_msg_queue(io_msg_queue),
     m_req_mapping(backend.dev(), dpu_req_rb_cap, host_req_mmap_desc, host_req_mem_addr, host_req_mem_size),
-    m_resp_mapping(backend.dev(), dpu_resp_rb_cap, host_resp_mmap_desc, host_resp_mem_addr, host_resp_mem_size) {}
+    m_resp_mapping(backend.dev(), dpu_resp_rb_cap, host_resp_mmap_desc, host_resp_mem_addr, host_resp_mem_size) {
+    SPDLOG_INFO("create a dma_qp_mapping[id={}]", id);
+}
 
 DmaQpMapping::~DmaQpMapping() {
     m_producer->clean_sync();

@@ -53,5 +53,8 @@ int main() {
     std::string msg = "hello, world!";
     std::memcpy(producer.buf_data(), msg.data(), msg.size());
     producer.send_sync(msg.size());
+
+    producer.clean_sync();
+    server.clean_sync();
     return 0;
 }

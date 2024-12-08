@@ -45,8 +45,15 @@ public:
             assert(not ret);
         }
     }
-    ~PassiveConsumer() {
+
+    void clean_sync() {
         m_consumer->clean_sync();
+    }
+
+    ~PassiveConsumer() {
+        if (not m_consumer->is_cleaned()) {
+            m_consumer->clean_sync();
+        }
     }
 
 private:

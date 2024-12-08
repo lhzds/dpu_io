@@ -42,5 +42,8 @@ int main() {
     while (not is_recved) {
         doca_pe_progress(pe);
     }
+
+    consumer.clean_sync();
+    client.clean_sync();
     return 0;
 }

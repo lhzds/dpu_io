@@ -15,6 +15,7 @@ FrontendQp::FrontendQp(Frontend &frontend, size_t id,
         m_req_rb.cap(), DOCA_ACCESS_FLAG_PCI_READ_WRITE);
     m_resp_mmap = std::make_unique<docacxx::Mmap>(frontend.dev(), m_resp_rb.data(),
         m_resp_rb.cap(), DOCA_ACCESS_FLAG_PCI_READ_WRITE);
+    SPDLOG_INFO("create a frontend_qp[id={}]", id);
 };
 
 FrontendQp::~FrontendQp() {

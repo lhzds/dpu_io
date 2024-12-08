@@ -60,7 +60,7 @@ Backend::Backend(const std::string_view &name, const std::string_view &dev_pci,
         auto *header = init_qp_msg.header;
         
         // 使用 1:1 大小的队列映射
-        m_qps.emplace_back(std::make_unique<DmaQpMapping>(*this, m_io_ctx.get(), m_io_msg_queue,
+        m_qps.emplace_back(std::make_unique<DmaQpMapping>(*this, i, m_io_ctx.get(), m_io_msg_queue,
             header->host_req_mem_size,
             ConstBytesView(init_qp_msg.host_req_mmap_desc, header->host_req_mmap_desc_size),
             header->host_req_mem_addr, header->host_req_mem_size,

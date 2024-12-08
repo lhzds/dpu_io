@@ -44,7 +44,7 @@ public:
         RingBufferRep::Slice m_rb_slice;
     };
 
-    DmaQpMapping(Backend &backend, IoCtx *io_ctx, MsgQueue &m_io_msg_queue,
+    DmaQpMapping(Backend &backend, size_t id, IoCtx *io_ctx, MsgQueue &m_io_msg_queue,
         size_t dpu_req_rb_cap, ConstBytesView host_req_mmap_desc, 
         char *host_req_mem_addr, size_t host_req_mem_size,
         size_t dpu_resp_rb_cap, ConstBytesView host_resp_mmap_desc,

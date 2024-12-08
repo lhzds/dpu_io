@@ -1,6 +1,7 @@
 #include "config.h"
 #include "doca_wrapper/passive_consumer.h"
 #include "docacxx/ctx/client.h"
+#include "scoped_guard.h"
 #include <doca_pe.h>
 
 using namespace docacxx;
@@ -12,6 +13,15 @@ int main() {
     check_derr(open_doca_device_with_pci(HOST_DEV_PCI, &dev),
         "failed to open dev");
     check_derr(doca_pe_create(&pe), "failed to create pe");
+
+    ScopeGuard guard([&] {
+        if (auto result = doca_pe_destroy(pe); result != DOCA_SUCCESS) {
+            std::cerr << "failed to destroy pe: " << doca_error_get_descr(result) << std::endl;
+        }
+        if (auto result = doca_dev_close(dev); result != DOCA_SUCCESS) {
+            std::cerr << "failed to close dev: " << doca_error_get_descr(result) << std::endl;
+        }
+    });
 
     comch::Client::Cfg client_cfg;
     client_cfg.m_max_send_task_slot_num = 1;
@@ -31,13 +41,6 @@ int main() {
 
     while (not is_recved) {
         doca_pe_progress(pe);
-    }
-
-    if (auto result = doca_pe_destroy(pe); result != DOCA_SUCCESS) {
-        std::cerr << "failed to destroy pe: " << doca_error_get_descr(result) << std::endl;
-    }
-    if (auto result = doca_dev_close(dev); result != DOCA_SUCCESS) {
-        std::cerr << "failed to close dev: " << doca_error_get_descr(result) << std::endl;
     }
     return 0;
 }

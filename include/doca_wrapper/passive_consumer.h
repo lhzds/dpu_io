@@ -24,9 +24,12 @@ public:
             (std::unique_ptr<docacxx::comch::Consumer::PostRecvTask> task) {
             assert(task && task->raw());
             auto *buf = task->buf();
-            auto [data, size] = buf->get_doca_buf_data();
-            cb({data, size});
-            buf->clear_doca_buf_data();
+            if (buf) {
+                auto [data, size] = buf->get_doca_buf_data();
+                cb({data, size});
+                buf->clear_doca_buf_data();
+            }
+            
             auto ret = m_consumer->submit(std::move(task));
             assert(not ret);
         });

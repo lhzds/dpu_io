@@ -10,7 +10,7 @@ class SingleTaskProducer: public docacxx::comch::Producer {
 public:
     SingleTaskProducer(doca_comch_connection *peer_conn,
         doca_pe *pe, doca_dev *dev, size_t buf_size, size_t consumer_id)
-        :Producer(peer_conn, pe, dev, Cfg{1}) {
+        :Producer(peer_conn, pe, dev, Cfg{1}), m_consumer_id(consumer_id) {
         m_buf_inv = std::make_unique<docacxx::BufInventoryWithMmap>(dev, buf_size, 1);
         m_buf = m_buf_inv->get_buf(size_t(0), buf_size);
 
@@ -84,7 +84,7 @@ private:
     std::unique_ptr<Producer::SendTask> m_task;
     size_t m_consumer_id{};
 
-    std::function<void()> m_send_cb;
+    std::function<void()> m_send_cb {[] {}};
     std::function<void()> m_send_error_cb {[] { throw_with("send_error");}};
 
     bool m_is_sended{};

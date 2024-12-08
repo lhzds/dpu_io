@@ -4,6 +4,7 @@
 #include "docacxx/ctx/consumer.h"
 #include "docacxx/mem.h"
 #include <memory>
+#include <spdlog/spdlog.h>
 
 namespace pulsedb {
 class PassiveConsumer {
@@ -25,6 +26,9 @@ public:
             cb({imm_data, imm_data_size});
             auto ret = m_consumer->submit(std::move(task));
             assert(not ret);
+        });
+        m_consumer->set_post_recv_error_cb([](auto task) {
+            SPDLOG_INFO("passive_consumer: post_recv task failed");
         });
         m_consumer->start_sync();
         // 初始提交所有 post_recv_task

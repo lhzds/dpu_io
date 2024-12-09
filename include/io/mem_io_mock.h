@@ -1,4 +1,5 @@
 #include <condition_variable>
+#include <iostream>
 #include <map>
 #include <mutex>
 #include <queue>
@@ -23,8 +24,7 @@ public:
 
     virtual void open_async(const std::string_view &filename, uint32_t open_flags, OpenCb cb) override {
         std::unique_lock lck(m_mutex);
-        std::string name = std::string(filename);
-        m_task_queue.emplace([&, cb = std::move(cb)] {
+        m_task_queue.emplace([&, name = std::string(filename), cb = std::move(cb)] {
             if (m_meta.count(name) == 0) {
                 m_meta[name] = next_file_id();
                 m_mem_files.emplace_back();
@@ -60,7 +60,7 @@ public:
         if (offset >= m_mem_files[file_id].size()) {
             throw_with("read out-of-range");
         }
-        m_task_queue.emplace([&, file_id, cb = std::move(cb), iov = std::move(iov)] {
+        m_task_queue.emplace([&, file_id, offset, cb = std::move(cb), iov = std::move(iov)] {
             ConstBytesView file_view = m_mem_files[file_id].content.subspan(offset);
             size_t total_read_size{};
             for (const auto &v : iov) {
@@ -82,7 +82,7 @@ public:
         if (file_id >= m_next_file_id || not m_mem_files[file_id].is_open) {
             throw_with("file is not open");
         }
-        m_task_queue.emplace([&, cb = std::move(cb)] {
+        m_task_queue.emplace([cb = std::move(cb)] {
             cb(0);
         });
         m_cv.notify_one();
@@ -108,11 +108,11 @@ private:
     void bg_work() {
         std::unique_lock lck(m_mutex);
         while (not m_is_killed) {
-            m_cv.wait(lck, [&] { return not m_task_queue.empty() || not m_is_killed; });
+            m_cv.wait(lck, [&] { return not m_task_queue.empty() || m_is_killed; });
             while (not m_task_queue.empty()) {
-                auto task = std::move(m_task_queue.front());
-                m_task_queue.pop();
+                auto &task = m_task_queue.front();
                 task();
+                m_task_queue.pop();
             }
         }
     }

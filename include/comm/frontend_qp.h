@@ -54,7 +54,6 @@ private:
     void update_host_req_rb_head();
     void update_host_resp_rb_tail();
 
-    void recv_d2h_rb_meta_msg(const ConstBytesView &raw_msg);
     size_t find_free_req_slot();
 
     doca_pe *m_pe{};

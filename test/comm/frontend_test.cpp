@@ -12,7 +12,6 @@ int main() {
         file_id = fid;
     });
     qp.poll_wait();
-    std::cout << file_id;
     
     return 0;
 }

@@ -172,6 +172,7 @@ void FrontendQp::update_host_req_rb_head() {
     if (m_d2h_rb_meta_msg.type != D2HRbMetaMsg::Type::NEW_HOST_REQ_RB_HEAD) {
         throw_with("wrong d2h_rb_meta_msg type");
     }
+    SPDLOG_INFO("receive new_host_req_rb_head={}", m_d2h_rb_meta_msg.payload.host_req_rb_head);
     auto read_size = m_req_rb.len(m_req_rb.head(), m_d2h_rb_meta_msg.payload.host_req_rb_head);
     m_req_rb.read(read_size);
 }
@@ -191,6 +192,7 @@ void FrontendQp::update_host_resp_rb_tail() {
     if (m_d2h_rb_meta_msg.type != D2HRbMetaMsg::Type::NEW_HOST_RESP_RB_TAIL) {
         throw_with("wrong d2h_rb_meta_msg type");
     }
+    SPDLOG_INFO("receive new_host_resp_rb_tail={}", m_d2h_rb_meta_msg.payload.host_resp_rb_tail);
     auto write_size = m_resp_rb.len(m_resp_rb.tail(), m_d2h_rb_meta_msg.payload.host_resp_rb_tail);
     m_resp_rb.rep().write(write_size);
 }

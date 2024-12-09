@@ -1,5 +1,6 @@
 #include <cerrno>
 #include <memory>
+#include <spdlog/spdlog.h>
 
 #include "dma_qp_mapping.h"
 #include "bytes.h"
@@ -55,10 +56,12 @@ void DmaQpMapping::recv_h2d_rb_meta_msg(const ConstBytesView &raw_msg) {
     using Type = H2DRbMetaMsg::Type;
     switch (msg->type) {
         case Type::NEW_HOST_REQ_RB_TAIL: {
+            SPDLOG_INFO("receive new_host_req_rb_tail={}", msg->payload.new_host_req_rb_tail);
             submit_new_reqs(msg->payload.new_host_req_rb_tail);
             break;
         }
         case Type::REQUIRE_HOST_REQ_RB_HEAD: {
+            SPDLOG_INFO("receive host_req_rb_head={}", msg->payload.host_req_rb_head);
             if (msg->payload.host_req_rb_head == m_req_mapping.host_rb_rep.head()) {
                 m_need_host_req_rb_head = true;
             } else {
@@ -67,11 +70,13 @@ void DmaQpMapping::recv_h2d_rb_meta_msg(const ConstBytesView &raw_msg) {
             break;
         }
         case Type::NEW_HOST_RESP_RB_HEAD: {
+            SPDLOG_INFO("receive new_host_resp_rb_head={}", msg->payload.new_host_resp_rb_head);
             auto &host_resp_rb_rep = m_resp_mapping.host_rb_rep;
             size_t old_host_resp_rb_head = host_resp_rb_rep.head();
-            size_t read_size = host_resp_rb_rep.len(old_host_resp_rb_head, msg->payload.new_host_resp_rb_head);
+            size_t read_size = host_resp_rb_rep.len(old_host_resp_rb_head,
+                msg->payload.new_host_resp_rb_head);
             host_resp_rb_rep.read(read_size);
-            while (m_resp_dma_wait_queue.front().cond()) {
+            while (not m_resp_dma_wait_queue.empty() and m_resp_dma_wait_queue.front().cond()) {
                 auto &[_, resp_dma_action] = m_resp_dma_wait_queue.front();
                 resp_dma_action();
                 m_resp_dma_wait_queue.pop();
@@ -79,6 +84,7 @@ void DmaQpMapping::recv_h2d_rb_meta_msg(const ConstBytesView &raw_msg) {
             break;
         }
         case Type::REQUIRE_HOST_RESP_RB_TAIL: {
+             SPDLOG_INFO("receive host_resp_rb_tail={}", msg->payload.host_resp_rb_tail);
             if (msg->payload.host_resp_rb_tail == m_host_resp_rb_dma_done_tail) {
                 m_need_host_resp_rb_tail = true;
             } else {
@@ -106,6 +112,8 @@ void DmaQpMapping::submit_new_reqs(size_t new_host_req_rb_tail) {
     auto insert_req_action = [&, host_slice, new_req_msg_size] {
         auto dpu_slice = dpu_req_rb.rep().write(new_req_msg_size); // 申请空间
         assert(dpu_slice.has_value());
+        SPDLOG_INFO("start dma to copy new req msg[start_offset={}, size={}]",
+            dpu_slice->first_part().offset, new_req_msg_size);
         req_msgs.emplace_back(Msg::Status::DmaInProgress, *dpu_slice); // 记录元数据
         // 添加 dma 任务
         auto req_batch_msg_iter = std::prev(req_msgs.end());
@@ -125,6 +133,9 @@ void DmaQpMapping::submit_new_reqs(size_t new_host_req_rb_tail) {
 }
 
 void DmaQpMapping::req_batch_dma_done_cb(std::list<Msg>::iterator req_batch_msg_iter) {
+    const auto &req_batch_msg_slice = req_batch_msg_iter->rb_slice();
+    SPDLOG_INFO("req msg dma done[start_offset={}, size={}]",
+        req_batch_msg_slice.first_part().offset, req_batch_msg_slice.size());
     auto &req_msgs = m_req_mapping.dpu_msgs;
     auto &host_req_rb_rep = m_req_mapping.host_rb_rep;
     bool update_host_req_rb_head{};
@@ -190,13 +201,17 @@ void DmaQpMapping::process_req(RingBufferRequest::Type req_type, RingBufferReque
     using RbReq = RingBufferRequest;
     using RbResp = RingBufferResponse;
     auto &dpu_resp_rb = m_resp_mapping.dpu_rb;
+    const auto &req_msg_slice = req_msg.rb_slice();
 
     switch (req_type) {
         case RbReq::Type::OPEN: {
+            SPDLOG_INFO("start processing open_req[start_offset={}, size={}]",
+                req_msg_slice.first_part().offset, req_msg_slice.size());
             auto open_req = RbReq::get_req_ptr<RbReq::OpenRequest>(req_variant);
             m_io_ctx->open_async({open_req->filename, open_req->header->filename_size},
                 open_req->header->open_flags,
-                [&, req_id = open_req->header->req_id](int32_t error_code, size_t file_id) {
+                [&, resp_view, req_id = open_req->header->req_id](int32_t error_code, size_t file_id) mutable {
+                SPDLOG_INFO("open_req is finished");
                 RbResp::OpenHeader header;
                 header.type = RbResp::Type::OPEN;
                 header.req_id = req_id;
@@ -206,6 +221,7 @@ void DmaQpMapping::process_req(RingBufferRequest::Type req_type, RingBufferReque
                 assert(ret);
                 // pe 等对象线性不安全，所以通过消息传递回主线程执行
                 auto io_msg = [&] {
+                    SPDLOG_INFO("start open_resp dma");
                     req_process_done_cb(req_msg, resp_msg);
                 };
                 while (not m_io_msg_queue.push(io_msg));
@@ -213,9 +229,12 @@ void DmaQpMapping::process_req(RingBufferRequest::Type req_type, RingBufferReque
             break;
         }
         case RbReq::Type::CLOSE: {
+            SPDLOG_INFO("start processing close_req[start_offset={}, size={}]",
+                req_msg_slice.first_part().offset, req_msg_slice.size());
             auto close_req = RbReq::get_req_ptr<RbReq::CloseRequest>(req_variant);
             m_io_ctx->close_async(close_req->header->file_id,
-                [&, req_id = close_req->header->req_id](int32_t error_code) {
+                [&, resp_view, req_id = close_req->header->req_id](int32_t error_code) mutable {
+                SPDLOG_INFO("close_req is finished");
                 RbResp::CloseHeader header;
                 header.type = RbResp::Type::CLOSE;
                 header.error_code = error_code;
@@ -224,6 +243,7 @@ void DmaQpMapping::process_req(RingBufferRequest::Type req_type, RingBufferReque
                 assert(ret);
                 // pe 等对象线性不安全，所以通过消息传递回主线程执行
                 auto io_msg = [&] {
+                    SPDLOG_INFO("start close_resp dma");
                     req_process_done_cb(req_msg, resp_msg);
                 };
                 while (not m_io_msg_queue.push(io_msg));
@@ -231,6 +251,8 @@ void DmaQpMapping::process_req(RingBufferRequest::Type req_type, RingBufferReque
             break;
         }
         case RbReq::Type::READ: {
+            SPDLOG_INFO("start processing read_req[start_offset={}, size={}]",
+                req_msg_slice.first_part().offset, req_msg_slice.size());
             auto read_req = RbReq::get_req_ptr<RbReq::ReadRequest>(req_variant);
             auto header_view = resp_view.cut(sizeof(RbResp::ReadResponse));
             auto &read_dst_view = resp_view;
@@ -242,7 +264,9 @@ void DmaQpMapping::process_req(RingBufferRequest::Type req_type, RingBufferReque
                 }
             }
             m_io_ctx->read_async(read_req->header->file_id, read_req->header->offset, std::move(iov),
-                [&, req_id = read_req->header->req_id](int32_t error_code, size_t read_size) {
+                [&, resp_view, req_id = read_req->header->req_id]
+                    (int32_t error_code, size_t read_size) mutable {
+                SPDLOG_INFO("read_req is finished");
                 RbResp::ReadHeader header;
                 header.type = RbResp::Type::READ;
                 header.req_id = req_id;
@@ -252,6 +276,7 @@ void DmaQpMapping::process_req(RingBufferRequest::Type req_type, RingBufferReque
                 assert(ret);
                 // pe 等对象线性不安全，所以通过消息传递回主线程执行
                 auto io_msg = [&] {
+                    SPDLOG_INFO("start read_resp dma");
                     req_process_done_cb(req_msg, resp_msg);
                 };
                 while (not m_io_msg_queue.push(io_msg));
@@ -259,6 +284,8 @@ void DmaQpMapping::process_req(RingBufferRequest::Type req_type, RingBufferReque
             break;
         }
         case RbReq::Type::WRITE: {
+            SPDLOG_INFO("start processing write_req[start_offset={}, size={}]",
+                req_msg_slice.first_part().offset, req_msg_slice.size());
             auto write_req = RbReq::get_req_ptr<RbReq::WriteRequest>(req_variant);
             std::vector<ConstBytesView> iov;
             if (write_req->content && write_req->content->size()) {
@@ -268,7 +295,8 @@ void DmaQpMapping::process_req(RingBufferRequest::Type req_type, RingBufferReque
                 }
             }
             m_io_ctx->write_async(write_req->header->file_id, write_req->header->offset, std::move(iov),
-                [&, req_id = write_req->header->req_id](int32_t error_code) {
+                [&, resp_view, req_id = write_req->header->req_id](int32_t error_code) mutable {
+                SPDLOG_INFO("write_req is finished");
                 RbResp::WriteHeader header;
                 header.type = RbResp::Type::WRITE;
                 header.req_id = req_id;
@@ -277,6 +305,7 @@ void DmaQpMapping::process_req(RingBufferRequest::Type req_type, RingBufferReque
                 assert(ret);
                 // pe 等对象线性不安全，所以通过消息传递回主线程执行
                 auto io_msg = [&] {
+                    SPDLOG_INFO("start write_resp dma");
                     req_process_done_cb(req_msg, resp_msg);
                 };
                 while (not m_io_msg_queue.push(io_msg));
@@ -284,9 +313,12 @@ void DmaQpMapping::process_req(RingBufferRequest::Type req_type, RingBufferReque
             break;
         }
         case RbReq::Type::FSYNC: {
+            SPDLOG_INFO("start processing fsync_req[start_offset={}, size={}]",
+                req_msg_slice.first_part().offset, req_msg_slice.size());
             auto fsync_req = RbReq::get_req_ptr<RbReq::FsyncRequest>(req_variant);
             m_io_ctx->fsync_async(fsync_req->header->file_id,
-                [&, req_id = fsync_req->header->req_id](int32_t error_code) {
+                [&, resp_view, req_id = fsync_req->header->req_id](int32_t error_code) mutable {
+                SPDLOG_INFO("fsync_req is finished");
                 RbResp::FsyncHeader header;
                 header.type = RbResp::Type::FSYNC;
                 header.error_code = error_code;
@@ -295,6 +327,7 @@ void DmaQpMapping::process_req(RingBufferRequest::Type req_type, RingBufferReque
                 assert(ret);
                 // pe 等对象线性不安全，所以通过消息传递回主线程执行
                 auto io_msg = [&] {
+                    SPDLOG_INFO("start fsync_resp dma");
                     req_process_done_cb(req_msg, resp_msg);
                 };
                 while (not m_io_msg_queue.push(io_msg));
@@ -318,7 +351,7 @@ void DmaQpMapping::req_process_done_cb(Msg &req_msg, Msg &resp_msg) {
     }
     
     // 执行等待任务
-    while (req_insert_wait_queue.front().cond()) {
+    while (not req_insert_wait_queue.empty() && req_insert_wait_queue.front().cond()) {
         auto &[_, req_insert_action] = req_insert_wait_queue.front();
         req_insert_action();
         req_insert_wait_queue.pop();
@@ -381,7 +414,7 @@ void DmaQpMapping::resp_dma_done_cb(Msg &resp_msg) {
         send_host_resp_rb_tail();
     }
 
-    while (resp_insert_wait_queue.front().cond()) {
+    while (not resp_insert_wait_queue.empty() and resp_insert_wait_queue.front().cond()) {
         auto &[_, resp_insert_action] = resp_insert_wait_queue.front();
         resp_insert_action();
         resp_insert_wait_queue.pop();

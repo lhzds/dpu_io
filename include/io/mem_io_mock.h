@@ -1,5 +1,4 @@
 #include <condition_variable>
-#include <iostream>
 #include <map>
 #include <mutex>
 #include <queue>
@@ -40,12 +39,15 @@ public:
         if (file_id >= m_next_file_id || not m_mem_files[file_id].is_open) {
             throw_with("file is not open");
         }
-        if (offset != m_mem_files[file_id].size()) {
-            throw_with("append-only");
-        }
         m_task_queue.emplace([&, file_id, cb = std::move(cb), iov = std::move(iov)] {
+            size_t write_size{};
+            auto &file = m_mem_files[file_id];
             for (const auto &v : iov) {
-                m_mem_files[file_id].append(ConstBytesView(v));
+                write_size += v.size();
+                if (auto needed_size = offset + write_size; file.size() < needed_size) {
+                    file.append(BytesBuffer(needed_size - file.size()));
+                }
+                std::memcpy(file.data(), v.data(), v.size());
             }
             cb(0);
         });
@@ -57,11 +59,14 @@ public:
         if (file_id >= m_next_file_id || not m_mem_files[file_id].is_open) {
             throw_with("file is not open");
         }
-        if (offset >= m_mem_files[file_id].size()) {
-            throw_with("read out-of-range");
-        }
         m_task_queue.emplace([&, file_id, offset, cb = std::move(cb), iov = std::move(iov)] {
-            ConstBytesView file_view = m_mem_files[file_id].content.subspan(offset);
+            auto &file = m_mem_files[file_id];
+            if (offset > file.size()) {
+                cb(0, 0);
+                return;
+            }
+            
+            ConstBytesView file_view = file.content.subspan(offset);
             size_t total_read_size{};
             for (const auto &v : iov) {
                 if (file_view.size() == 0) {
@@ -133,6 +138,9 @@ private:
         }
         size_t size() {
             return content.size();
+        }
+        char *data() {
+            return content.data();
         }
     };
     std::map<std::string, size_t> m_meta;

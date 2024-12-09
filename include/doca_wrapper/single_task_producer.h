@@ -72,6 +72,11 @@ public:
         m_send_error_cb = std::move(cb);
     }
 
+    void stop() override {
+        m_task.reset();
+        Producer::stop();
+    }
+
 private:
     using Producer::Cfg;
     using Producer::alloc_send_task;
@@ -79,8 +84,8 @@ private:
     using Producer::set_send_cb;
     using Producer::set_send_error_cb;
 
-    std::unique_ptr<docacxx::Buffer> m_buf;
     std::unique_ptr<docacxx::BufInventoryWithMmap> m_buf_inv;
+    std::unique_ptr<docacxx::Buffer> m_buf;
     std::unique_ptr<Producer::SendTask> m_task;
     size_t m_consumer_id{};
 

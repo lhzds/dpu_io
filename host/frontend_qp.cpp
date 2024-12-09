@@ -65,7 +65,7 @@ void FrontendQp::post_request(WriteReqFunc write_req_func, Callback callback, Ar
     ++m_pending_req_cnt;
     
     auto slot_id = find_free_req_slot();
-    m_req_slots[slot_id].m_is_free = true;
+    m_req_slots[slot_id].m_is_free = false;
     if (callback != nullptr) {
         m_req_slots[slot_id].m_callback = std::move(callback);
     }

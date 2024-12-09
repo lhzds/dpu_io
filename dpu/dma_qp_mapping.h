@@ -60,8 +60,8 @@ private:
     void req_batch_dma_done_cb(std::list<Msg>::iterator req_batch_iter);
     void process_req(RingBufferRequest::Type type, RingBufferRequest::Variant &req_variant,
         RingBuffer::View resp_view, Msg &req_msg, Msg &resp_ms);
-    void req_process_done_cb(Msg &req_msg, Msg &resp_msg);
-    void resp_dma_done_cb(Msg &resp_msg);
+    void req_process_done_cb(size_t req_id, Msg &req_msg, Msg &resp_msg);
+    void resp_dma_done_cb(size_t req_id, Msg &resp_msg);
 
     std::vector<QueueDma::MemcpySeg> make_memcpy_segs(RingBufferRep::Slice src, RingBufferRep::Slice dst);
     void send_host_req_rb_head();

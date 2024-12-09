@@ -2,6 +2,7 @@
 #include <map>
 #include <mutex>
 #include <queue>
+#include <spdlog/spdlog.h>
 #include <thread>
 
 #include "bytes.h"
@@ -29,7 +30,8 @@ public:
                 m_mem_files.emplace_back();
                 m_mem_files.back().is_open = true;
             }
-            cb(0, m_meta[name]);
+            size_t fid = m_meta[name];
+            cb(0, fid);
         });
         m_cv.notify_one();
     }

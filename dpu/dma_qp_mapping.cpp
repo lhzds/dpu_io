@@ -206,12 +206,14 @@ void DmaQpMapping::process_req(RingBufferRequest::Type req_type, RingBufferReque
     switch (req_type) {
         case RbReq::Type::OPEN: {
             auto open_req = RbReq::get_req_ptr<RbReq::OpenRequest>(req_variant);
-            SPDLOG_INFO("start processing open_req[id={}, start_offset={}, size={}]",
-                open_req->header->req_id, req_msg_slice.first_part().offset, req_msg_slice.size());
+            SPDLOG_INFO("start processing open_req[id={}, start_offset={}, size={}, filename={}]",
+                open_req->header->req_id, req_msg_slice.first_part().offset, req_msg_slice.size(),
+                std::string_view(open_req->filename, open_req->header->filename_size));
             m_io_ctx->open_async({open_req->filename, open_req->header->filename_size},
                 open_req->header->open_flags,
                 [&, resp_view, req_id = open_req->header->req_id](int32_t error_code, size_t file_id) mutable {
-                SPDLOG_INFO("open_req is finished[id={}]", req_id);
+                SPDLOG_INFO("open_req is finished[id={}, error_code={}, file_id={}]",
+                    req_id, error_code, file_id);
                 RbResp::OpenHeader header;
                 header.type = RbResp::Type::OPEN;
                 header.req_id = req_id;
@@ -234,7 +236,7 @@ void DmaQpMapping::process_req(RingBufferRequest::Type req_type, RingBufferReque
                 close_req->header->req_id, req_msg_slice.first_part().offset, req_msg_slice.size());
             m_io_ctx->close_async(close_req->header->file_id,
                 [&, resp_view, req_id = close_req->header->req_id](int32_t error_code) mutable {
-                SPDLOG_INFO("close_req is finished[id={}]", req_id);
+                SPDLOG_INFO("close_req is finished[id={}, error_code={}]", req_id, error_code);
                 RbResp::CloseHeader header;
                 header.type = RbResp::Type::CLOSE;
                 header.error_code = error_code;
@@ -266,7 +268,8 @@ void DmaQpMapping::process_req(RingBufferRequest::Type req_type, RingBufferReque
             m_io_ctx->read_async(read_req->header->file_id, read_req->header->offset, std::move(iov),
                 [&, resp_view, req_id = read_req->header->req_id]
                     (int32_t error_code, size_t read_size) mutable {
-                SPDLOG_INFO("read_req is finished[id={}]", req_id);
+                SPDLOG_INFO("read_req is finished[id={}, error_code={}, read_size={}]",
+                    req_id, error_code, read_size);
                 RbResp::ReadHeader header;
                 header.type = RbResp::Type::READ;
                 header.req_id = req_id;
@@ -296,7 +299,7 @@ void DmaQpMapping::process_req(RingBufferRequest::Type req_type, RingBufferReque
             }
             m_io_ctx->write_async(write_req->header->file_id, write_req->header->offset, std::move(iov),
                 [&, resp_view, req_id = write_req->header->req_id](int32_t error_code) mutable {
-                SPDLOG_INFO("write_req is finished[id={}]", req_id);
+                SPDLOG_INFO("write_req is finished[id={}], error_code={}]", req_id, error_code);
                 RbResp::WriteHeader header;
                 header.type = RbResp::Type::WRITE;
                 header.req_id = req_id;
@@ -318,7 +321,7 @@ void DmaQpMapping::process_req(RingBufferRequest::Type req_type, RingBufferReque
                 fsync_req->header->req_id, req_msg_slice.first_part().offset, req_msg_slice.size());
             m_io_ctx->fsync_async(fsync_req->header->file_id,
                 [&, resp_view, req_id = fsync_req->header->req_id](int32_t error_code) mutable {
-                SPDLOG_INFO("fsync_req is finished[id={}]", req_id);
+                SPDLOG_INFO("fsync_req is finished[id={}, error_code={}]", req_id, error_code);
                 RbResp::FsyncHeader header;
                 header.type = RbResp::Type::FSYNC;
                 header.error_code = error_code;

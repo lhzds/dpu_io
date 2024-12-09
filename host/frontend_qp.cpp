@@ -81,7 +81,8 @@ void FrontendQp::poll_wait() {
 }
 
 void FrontendQp::poll_wait(size_t n) {
-    for (size_t i{}; i < std::min(n, m_pending_req_cnt); ++i) {
+    auto wait_req_cnt{std::min(n, m_pending_req_cnt)};
+    for (size_t i{}; i < wait_req_cnt; ++i) {
         // 轮询等待 DPU 处理结果
         while (m_resp_rb.empty()) {
             update_host_resp_rb_tail();
@@ -137,9 +138,9 @@ void FrontendQp::poll_wait(size_t n) {
         }
         req_slot.m_is_free = true;
         req_slot.m_callback = std::any{};
-        --m_pending_req_cnt;
         // send_host_req_rb_tail();
     }
+    m_pending_req_cnt -= m_pending_req_cnt;
     send_host_resp_rb_head();
 }
 

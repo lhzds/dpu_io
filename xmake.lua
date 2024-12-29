@@ -4,8 +4,9 @@ set_languages("c++20")
 if is_mode("debug") then
     add_defines("SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG")
 end
+
 add_requires("fmt 9.1.0", "spdlog", "boost")
-add_packages("fmt 9.1.0", "spdlog", "boost")
+add_packages("fmt", "spdlog", "boost")
 
 -- function link_spdk(target)
 --     local spdk_root_dir = path.join(os.projectdir(), "deps/spdk/build")

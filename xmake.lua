@@ -42,5 +42,5 @@ includes("deps/docacxx/xmake.lua")
 includes("host/xmake.lua")
 includes("dpu/xmake.lua")
 
--- includes("exp/xmake.lua")
+includes("exp/xmake.lua")
 includes("test/xmake.lua")

@@ -7,6 +7,7 @@
 
 #include "constant.h"
 
+namespace pulsedb {
 inline static std::string size_str(size_t sz) {
     if (sz >= 1 * MB) {
         return fmt::format("{:.2f}M", static_cast<double>(sz) / MB);
@@ -32,3 +33,4 @@ inline static std::string duration_str(Duration d) {
         throw std::runtime_error("unsupported duration type");
     }
 }
+} // namespace pulsedb

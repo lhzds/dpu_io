@@ -7,6 +7,7 @@
 
 #include "util.h"
 
+namespace pulsedb {
 class ConstBytesView {
 public:
     ConstBytesView(const std::string &str): m_data(str.data()), m_size(str.size()) {}
@@ -254,3 +255,4 @@ private:
     BytesBuffer m_cached;
     std::vector<ConstBytesView> m_views;
 };
+} // namespace pulsedb

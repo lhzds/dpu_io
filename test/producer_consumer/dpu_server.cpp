@@ -31,7 +31,7 @@ int main() {
     });
 
     comch::Server::Cfg server_cfg;
-    server_cfg.m_max_send_task_slot_num = 1;
+    server_cfg.max_send_task_slot_num = 1;
     comch::Server server(SERVER_NAME, dev, dev_rep, pe, server_cfg);
     doca_comch_connection *conn{};
     server.set_new_conn_cb([&](doca_comch_connection *c) {

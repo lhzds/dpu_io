@@ -5,6 +5,7 @@
 #include <boost/lockfree/spsc_queue.hpp>
 #include "constant.h"
 
+namespace pulsedb {
 // FIFO 事件队列（需要满足 cond，才能执行 action）
 struct Event {
     std::function<bool()> cond;
@@ -27,3 +28,4 @@ struct Interval {
         return origin;
     }
 };
+}

@@ -27,7 +27,7 @@ Backend::Backend(const std::string_view &name, const std::string_view &dev_pci,
     m_dma->start_sync();
 
     docacxx::comch::Server::Cfg server_cfg;
-    server_cfg.m_max_send_task_slot_num = 1; // 消息同步传输，所以只分配一个task slot
+    server_cfg.max_send_task_slot_num = 1; // 消息同步传输，所以只分配一个task slot
     m_ctrl_server = std::make_unique<docacxx::comch::Server>(name.data(), m_dev, m_dev_rep,
         m_pe, server_cfg);
     m_ctrl_server->set_new_conn_cb([&](doca_comch_connection *conn) {

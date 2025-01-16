@@ -4,6 +4,7 @@
 #include <stdexcept>
 #include <utility>
 
+namespace pulsedb {
 class PartIterator {
 public:
     PartIterator(size_t total_size, size_t part_size)
@@ -28,3 +29,4 @@ private:
     size_t m_part_size{};
     size_t m_next_part{};
 };
+}

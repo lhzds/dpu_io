@@ -19,7 +19,7 @@ Frontend::Frontend(const std::string_view &backend_name, const std::string_view 
     docacxx::check_derr(doca_pe_create(&m_pe), "failed to create pe");
 
     docacxx::comch::Client::Cfg client_cfg;
-    client_cfg.m_max_send_task_slot_num = 1; // 消息同步传输，所以只分配一个task slot
+    client_cfg.max_send_task_slot_num = 1; // 消息同步传输，所以只分配一个task slot
     m_ctrl_client = std::make_unique<docacxx::comch::Client>(backend_name.data(), m_dev,
         m_pe, client_cfg);
     m_ctrl_client->set_new_consumer_cb([&](doca_comch_connection *,uint32_t id) {

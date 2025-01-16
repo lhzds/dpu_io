@@ -35,8 +35,8 @@ DmaQpMapping::~DmaQpMapping() {
 
 void DmaQpMapping::create_consumer(Backend &backend) {
     PassiveConsumer::Cfg cfg;
-    cfg.m_post_recv_task_slot_num = 1; // 设计上同步传输，目前只需分配一个 task slot
-    cfg.m_max_msg_size = COMM_RB_META_SIZE;
+    cfg.post_recv_task_slot_num = 1; // 设计上同步传输，目前只需分配一个 task slot
+    cfg.max_msg_size = COMM_RB_META_SIZE;
     m_consumer = std::make_unique<PassiveConsumer>(backend.conn(), backend.pe(), backend.pe(),
         backend.dev(), cfg, [&](const auto &raw_msg) { recv_h2d_rb_meta_msg(raw_msg); });
 }

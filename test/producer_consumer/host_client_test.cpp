@@ -24,15 +24,15 @@ int main() {
     });
 
     comch::Client::Cfg client_cfg;
-    client_cfg.m_max_send_task_slot_num = 1;
+    client_cfg.max_send_task_slot_num = 1;
     comch::Client client(SERVER_NAME, dev, pe, client_cfg);
     client.start_sync();
     doca_comch_connection *conn = client.get_connection();
 
     // 创建 consumer
     PassiveConsumer::Cfg consumer_cfg;
-    consumer_cfg.m_max_msg_size = 1024;
-    consumer_cfg.m_post_recv_task_slot_num = 1;
+    consumer_cfg.max_msg_size = 1024;
+    consumer_cfg.post_recv_task_slot_num = 1;
     size_t is_recved{};
     PassiveConsumer consumer(conn, pe, pe, dev, consumer_cfg, [&](const ConstBytesView &raw_msg) {
         is_recved = true;

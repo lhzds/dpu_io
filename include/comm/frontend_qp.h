@@ -7,7 +7,6 @@
 
 #include "bytes.h"
 #include "doca_wrapper/passive_consumer.h"
-#include "docacxx/ctx/consumer.h"
 #include "docacxx/mem.h"
 #include "doca_wrapper/single_task_producer.h"
 #include "frontend.h"

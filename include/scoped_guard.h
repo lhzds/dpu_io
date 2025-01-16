@@ -1,6 +1,7 @@
 #pragma once
 #include<functional>
 
+namespace pulsedb {
 class ScopeGuard {
 public:
     explicit ScopeGuard(std::function<void()> func): m_func(std::move(func)) {}
@@ -11,3 +12,4 @@ public:
 private:
     std::function<void()> m_func;
 };
+}

@@ -1,5 +1,6 @@
 #pragma once
 
+namespace pulsedb {
 class Noncopyable {
 public:
     Noncopyable() = default;
@@ -8,3 +9,4 @@ public:
     Noncopyable &operator=(const Noncopyable &) = delete;
     Noncopyable &operator=(Noncopyable &&) = default;
 };
+}

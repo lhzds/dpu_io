@@ -3,6 +3,7 @@
 #include <functional>
 #include <memory>
 
+namespace pulsedb {
 template <typename Ret, typename... Args>
 class CallonceFn;
 
@@ -57,3 +58,4 @@ private:
 
     std::unique_ptr<StdFunc> m_heap_func;
 };
+}

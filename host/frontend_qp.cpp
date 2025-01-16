@@ -31,8 +31,8 @@ void FrontendQp::create_producer(Frontend &frontend) {
 
 void FrontendQp::create_consumer(Frontend &frontend) {
     PassiveConsumer::Cfg cfg;
-    cfg.m_max_msg_size = COMM_RB_META_SIZE;
-    cfg.m_post_recv_task_slot_num = 1;
+    cfg.max_msg_size = COMM_RB_META_SIZE;
+    cfg.post_recv_task_slot_num = 1;
     m_consumer = std::make_unique<PassiveConsumer>(frontend.conn(), m_pe,
         frontend.pe(), frontend.dev(), cfg, [&](const auto &view) {
         m_is_d2h_rb_meta_msg_recved = true;

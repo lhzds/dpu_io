@@ -1,6 +1,3 @@
-add_requires("argparse")
-add_packages("argparse")
-
 target("baseline")
     set_kind("binary")
     add_files("baseline.cpp")

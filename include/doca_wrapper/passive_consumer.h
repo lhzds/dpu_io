@@ -10,14 +10,14 @@ namespace pulsedb {
 class PassiveConsumer {
 public:
     struct Cfg: docacxx::comch::Consumer::Cfg {
-        size_t m_max_msg_size{128};
+        size_t max_msg_size{128};
     };
     using ContextTaskCompleteCallback = std::function<void(const ConstBytesView &)>;
 
     PassiveConsumer(doca_comch_connection *peer_conn, doca_pe *pe, doca_pe *conn_pe, doca_dev *dev,
         const Cfg &cfg, ContextTaskCompleteCallback cb) {
         m_buf_inv = std::make_unique<docacxx::BufInventoryWithMmap>(dev,
-            cfg.m_post_recv_task_slot_num * cfg.m_max_msg_size, cfg.m_post_recv_task_slot_num);
+            cfg.post_recv_task_slot_num * cfg.max_msg_size, cfg.post_recv_task_slot_num);
         m_consumer = std::make_unique<docacxx::comch::Consumer>(peer_conn, pe, conn_pe, m_buf_inv->mmap(), dev, cfg);
         // 完成解析消息，并自动提交新的 post_recv_task
         m_consumer->set_post_recv_cb([&, cb = std::move(cb)]
@@ -38,8 +38,8 @@ public:
         });
         m_consumer->start_sync();
         // 初始提交所有 post_recv_task
-        for (size_t i{}; i < cfg.m_post_recv_task_slot_num; ++i) {
-            m_bufs.emplace_back(m_buf_inv->get_buf(i * cfg.m_max_msg_size, cfg.m_max_msg_size));
+        for (size_t i{}; i < cfg.post_recv_task_slot_num; ++i) {
+            m_bufs.emplace_back(m_buf_inv->get_buf(i * cfg.max_msg_size, cfg.max_msg_size));
             auto task = m_consumer->alloc_post_recv_task(*m_bufs.back(), nullptr);
             auto ret = m_consumer->submit(std::move(task));
             assert(not ret);

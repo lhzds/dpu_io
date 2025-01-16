@@ -30,8 +30,8 @@ public:
 
     void post_memcpy(docacxx::Mmap &src_mmap, size_t src_offset, docacxx::Mmap &dst_mmap, 
         size_t dst_offset, size_t size, std::function<void()> cb) {
-        if (size > cap().m_max_buf_size) {
-            PartIterator part_iter(size, cap().m_max_buf_size);
+        if (size > cap().max_buf_size) {
+            PartIterator part_iter(size, cap().max_buf_size);
             auto *heap_cb = new std::function<void()>(std::move(cb));
             std::shared_ptr<std::function<void()>> shared_cb(heap_cb, [](auto *cb) {
                 cb->operator()();

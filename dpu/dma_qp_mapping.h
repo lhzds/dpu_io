@@ -95,4 +95,5 @@ private:
     bool m_need_host_resp_rb_tail{};
     EventQueue m_resp_dma_wait_queue{};
 };
-}
+
+} // namespace pulsedb

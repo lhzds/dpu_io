@@ -15,7 +15,7 @@ using namespace pulsedb;
 int main() {
     doca_dev *dev{};
     doca_pe *pe{};
-    docacxx::check_derr(docacxx::open_doca_device_with_pci(HOST_DEV_PCI, &dev),
+    docacxx::check_derr(docacxx::open_doca_device_with_pci(kHostDevPci, &dev),
         "failed to open dev");
     docacxx::check_derr(doca_pe_create(&pe), "failed to create pe");
     
@@ -30,7 +30,7 @@ int main() {
 
     docacxx::comch::Client::Cfg client_cfg;
     client_cfg.max_send_task_slot_num = 1;
-    docacxx::comch::Client client(SERVER_NAME, dev, pe, client_cfg);
+    docacxx::comch::Client client(kServerName, dev, pe, client_cfg);
 
     bool is_exited{};
     client.set_recv_cb([&](doca_comch_connection *, uint8_t *data, uint32_t len) {

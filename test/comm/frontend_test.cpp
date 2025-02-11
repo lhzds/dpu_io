@@ -6,8 +6,13 @@ using namespace pulsedb;
 
 constexpr size_t OP_NUM = 100;
 
+// TODO: open 回调记录映射关系，测试其他接口
+// TODO: 更换后端进行测试，添加删除文件
+// TODO：具有 sst pool 的文件后端（open lazy进行，其他正常，添加 delete 接口，异步化如何进行？）
+// TODO: 关闭日志功能，进行性能测试
+
 int main() {
-    Frontend frontend(BACKEND_NAME, HOST_DEV_PCI, 1);
+    Frontend frontend(kBackendName, kHostDevPci, 1);
     auto &qp = frontend.qp_ref(0);
     std::vector<size_t> file_ids;
     for (size_t i = 0; i < OP_NUM; ++i) {

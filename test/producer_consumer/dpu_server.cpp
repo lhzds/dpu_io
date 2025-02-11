@@ -12,10 +12,10 @@ int main() {
     doca_dev *dev{};
     doca_dev_rep *dev_rep{};
     doca_pe *pe{};
-    check_derr(open_doca_device_with_pci(DPU_DEV_PCI, &dev),
+    check_derr(open_doca_device_with_pci(kDpuDevPci, &dev),
         "failed to open dev");
     check_derr(open_doca_device_rep_with_pci(dev, DOCA_DEVINFO_REP_FILTER_NET,
-        DPU_DEV_REP_PCI, &dev_rep), "failed to open dev rep");
+        kDpuDevRepPci, &dev_rep), "failed to open dev rep");
     check_derr(doca_pe_create(&pe), "failed to create pe");
     
     ScopeGuard guard([&] {
@@ -32,7 +32,7 @@ int main() {
 
     comch::Server::Cfg server_cfg;
     server_cfg.max_send_task_slot_num = 1;
-    comch::Server server(SERVER_NAME, dev, dev_rep, pe, server_cfg);
+    comch::Server server(kServerName, dev, dev_rep, pe, server_cfg);
     doca_comch_connection *conn{};
     server.set_new_conn_cb([&](doca_comch_connection *c) {
         conn = c;

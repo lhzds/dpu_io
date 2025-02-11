@@ -29,4 +29,5 @@ private:
     size_t m_part_size{};
     size_t m_next_part{};
 };
-}
+
+} // namespace pulsedb

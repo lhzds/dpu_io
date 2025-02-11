@@ -1,6 +1,6 @@
 #pragma once
 
-constexpr char BACKEND_NAME[]{"backend"};
-constexpr char HOST_DEV_PCI[]{"b1:00.1"};
-constexpr char DPU_DEV_PCI[]{"03:00.1"};
-constexpr char DPU_DEV_REP_PCI[]{"b1:00.1"};
+constexpr char kBackendName[]{"backend"};
+constexpr char kHostDevPci[]{"b1:00.1"};
+constexpr char kDpuDevPci[]{"03:00.1"};
+constexpr char kDpuDevRepPci[]{"b1:00.1"};

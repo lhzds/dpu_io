@@ -742,4 +742,5 @@ struct D2HRbMetaMsg {
         size_t host_resp_rb_tail;
     } payload;
 };
-}
+
+} // namesapce pulsedb

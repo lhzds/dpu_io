@@ -40,7 +40,7 @@ Frontend::Frontend(const std::string_view &backend_name, const std::string_view 
 
     m_qps.reserve(qp_num);
     for (size_t i{}; i < qp_num; ++i) {
-        m_qps.emplace_back(std::make_unique<FrontendQp>(*this, i, HOST_REQ_RB_CAP, HOST_RESP_RB_CAP));
+        m_qps.emplace_back(std::make_unique<FrontendQp>(*this, i, kHostReqRbCap, kHostRespRbCap));
         auto &qp = *m_qps.back();
 
         send_init_qp_msg(i, qp.req_rb_ref().data(), qp.req_rb_ref().cap(),
@@ -136,4 +136,5 @@ size_t Frontend::recv_new_conumser_id() {
     SPDLOG_INFO("receive new consumer id={}", *m_new_consumer_id);
     return ret;
 }
-}
+
+} // namespace pulsedb

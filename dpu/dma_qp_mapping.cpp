@@ -36,7 +36,7 @@ DmaQpMapping::~DmaQpMapping() {
 void DmaQpMapping::create_consumer(Backend &backend) {
     PassiveConsumer::Cfg cfg;
     cfg.post_recv_task_slot_num = 1; // 设计上同步传输，目前只需分配一个 task slot
-    cfg.max_msg_size = COMM_RB_META_SIZE;
+    cfg.max_msg_size = kCommRbMetaSize;
     m_consumer = std::make_unique<PassiveConsumer>(backend.conn(), backend.pe(), backend.pe(),
         backend.dev(), cfg, [&](const auto &raw_msg) { recv_h2d_rb_meta_msg(raw_msg); });
 }
@@ -44,7 +44,7 @@ void DmaQpMapping::create_consumer(Backend &backend) {
 void DmaQpMapping::create_producer(Backend &backend) {
     size_t remote_consumer_id = backend.recv_new_conumser_id();
     m_producer = std::make_unique<SingleTaskProducer>(backend.conn(), backend.pe(), backend.dev(),
-        COMM_RB_META_SIZE, remote_consumer_id);
+        kCommRbMetaSize, remote_consumer_id);
     m_producer->start_sync();
 }
 
@@ -493,4 +493,5 @@ void DmaQpMapping::send_host_resp_rb_tail() {
     m_producer->try_submit_send_task(sizeof(*d2h_rb_meta_msg));
     m_need_host_resp_rb_tail = false;
 }
+
 } // namespace pulsedb

@@ -113,10 +113,10 @@ int main(int argc, char **argv) {
     doca_dev *dev{};
     doca_dev_rep *dev_rep{};
     doca_pe *pe{};
-    docacxx::check_derr(docacxx::open_doca_device_with_pci(DPU_DEV_PCI, &dev),
+    docacxx::check_derr(docacxx::open_doca_device_with_pci(kDpuDevPci, &dev),
         "failed to open dev");
     docacxx::check_derr(docacxx::open_doca_device_rep_with_pci(dev, DOCA_DEVINFO_REP_FILTER_NET,
-        DPU_DEV_REP_PCI, &dev_rep), "failed to open dev rep");
+        kDpuDevRepPci, &dev_rep), "failed to open dev rep");
     docacxx::check_derr(doca_pe_create(&pe), "failed to create pe");
     
     ScopeGuard guard([&] {
@@ -135,7 +135,7 @@ int main(int argc, char **argv) {
 
     docacxx::comch::Server::Cfg server_cfg;
     server_cfg.max_send_task_slot_num = 1;
-    docacxx::comch::Server server(SERVER_NAME, dev, dev_rep, pe, server_cfg);
+    docacxx::comch::Server server(kServerName, dev, dev_rep, pe, server_cfg);
     bool is_sended{};
     server.set_send_cb([&](auto) {
         is_sended = true;

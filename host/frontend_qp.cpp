@@ -25,13 +25,13 @@ FrontendQp::~FrontendQp() {
 void FrontendQp::create_producer(Frontend &frontend) {
     size_t remote_consumer_id = frontend.recv_new_conumser_id();
     m_producer = std::make_unique<SingleTaskProducer>(frontend.conn(), m_pe, frontend.dev(),
-        COMM_RB_META_SIZE, remote_consumer_id);
+        kCommRbMetaSize, remote_consumer_id);
     m_producer->start_sync();
 }
 
 void FrontendQp::create_consumer(Frontend &frontend) {
     PassiveConsumer::Cfg cfg;
-    cfg.max_msg_size = COMM_RB_META_SIZE;
+    cfg.max_msg_size = kCommRbMetaSize;
     cfg.post_recv_task_slot_num = 1;
     m_consumer = std::make_unique<PassiveConsumer>(frontend.conn(), m_pe,
         frontend.pe(), frontend.dev(), cfg, [&](const auto &view) {
@@ -207,4 +207,5 @@ size_t FrontendQp::find_free_req_slot() {
     m_req_slots.emplace_back();
     return m_req_slots.size() - 1;
 }
-}
+
+} // namespace pulsedb

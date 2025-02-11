@@ -23,7 +23,7 @@ Backend::Backend(const std::string_view &name, const std::string_view &dev_pci,
         dev_rep_pci.data(), &m_dev_rep), "failed to open dev rep");
     docacxx::check_derr(doca_pe_create(&m_pe), "failed to create pe");
 
-    m_dma = std::make_unique<QueueDma>(m_pe, m_dev, DPU_DMA_TASK_SLOT_NUM);
+    m_dma = std::make_unique<QueueDma>(m_pe, m_dev, kDpuDmaTaskSlotNum);
     m_dma->start_sync();
 
     docacxx::comch::Server::Cfg server_cfg;
@@ -174,4 +174,5 @@ size_t Backend::recv_new_conumser_id() {
     SPDLOG_INFO("receive new consumer id={}", *m_new_consumer_id);
     return ret;
 }
-}
+
+} // namespace pulsedb

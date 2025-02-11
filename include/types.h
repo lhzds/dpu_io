@@ -14,7 +14,7 @@ struct Event {
 using EventQueue = std::queue<Event>;
 
 using MsgQueue = boost::lockfree::spsc_queue<std::function<void()>,
-        boost::lockfree::capacity<MSG_QUEUE_SIZE>>;
+        boost::lockfree::capacity<kMsgQueueSize>>;
 
 // 区间类型
 struct Interval {
@@ -28,4 +28,5 @@ struct Interval {
         return origin;
     }
 };
-}
+
+} // namespace pulsedb

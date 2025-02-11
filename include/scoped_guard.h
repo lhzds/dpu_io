@@ -12,4 +12,5 @@ public:
 private:
     std::function<void()> m_func;
 };
-}
+
+} // namespace pulsedb

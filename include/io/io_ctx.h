@@ -35,4 +35,5 @@ public:
         throw_with("unimplemented");      
     }
 };
+
 } // namespace pulsedb

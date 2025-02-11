@@ -447,4 +447,5 @@ private:
     RingBufferRep m_rep;
     BytesBuffer m_buf;
 };
+
 } // namespace pulsedb

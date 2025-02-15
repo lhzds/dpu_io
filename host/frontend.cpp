@@ -11,7 +11,7 @@
 
 namespace pulsedb {
 Frontend::Frontend(const std::string_view &backend_name, const std::string_view &dev_pci,
-        size_t qp_num) {
+        size_t qp_num, size_t req_rb_cap, size_t resp_rb_cap) {
     SPDLOG_INFO("frontend is starting...");
     docacxx::check_derr(docacxx::open_doca_device_with_pci(dev_pci.data(), &m_dev),
             "failed to open dev");
@@ -39,7 +39,7 @@ Frontend::Frontend(const std::string_view &backend_name, const std::string_view 
 
     m_qps.reserve(qp_num);
     for (size_t i{}; i < qp_num; ++i) {
-        m_qps.emplace_back(std::make_unique<FrontendQp>(*this, i, kHostReqRbCap, kHostRespRbCap));
+        m_qps.emplace_back(std::make_unique<FrontendQp>(*this, i, req_rb_cap, resp_rb_cap));
         auto &qp = *m_qps.back();
 
         send_init_qp_msg(i, qp.req_rb_ref().data(), qp.req_rb_ref().cap(),

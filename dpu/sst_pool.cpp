@@ -7,10 +7,10 @@
 
 namespace pulsedb {
 SstPool::SstPool(std::string sst_dir, size_t base_pool_size,
-                 size_t max_num_mems_in_flush, size_t big_pool_size,
+                 size_t big_pool_cnt, size_t big_pool_size,
                  size_t file_size_base, size_t sst_pad_len)
     : m_sst_dir(std::move(sst_dir)), m_base_pool_size(base_pool_size),
-      m_big_pool_cnt(max_num_mems_in_flush - 1), m_big_pool_size(big_pool_size),
+      m_big_pool_cnt(big_pool_cnt), m_big_pool_size(big_pool_size),
       m_file_size_base(file_size_base), m_sst_pad_len(sst_pad_len) {
   create_ssts();
 

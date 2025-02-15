@@ -21,7 +21,8 @@ namespace pulsedb {
 class Backend: Noncopyable {
 public:
     Backend(const std::string_view &name, const std::string_view &dev_pci,
-        const std::string_view &dev_rep_pci, std::unique_ptr<IoCtx> io_ctx);
+        const std::string_view &dev_rep_pci, std::unique_ptr<IoCtx> io_ctx,
+        size_t dpu_req_rb_cap, size_t dpu_resp_rb_cap);
     ~Backend();
 
     void run();

@@ -11,5 +11,5 @@ target("queue_dma_test")
     add_deps("docacxx")
     add_packages("gtest")
 
--- includes("comm/xmake.lua")
+includes("comm/xmake.lua")
 includes("producer_consumer/xmake.lua")

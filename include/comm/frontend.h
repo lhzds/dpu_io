@@ -16,7 +16,7 @@ class FrontendQp;
 class Frontend: Noncopyable {
 public:
     Frontend(const std::string_view &backend_name, const std::string_view &dev_pci,
-        size_t qp_num);
+        size_t qp_num, size_t req_rb_cap, size_t resp_rb_cap);
     ~Frontend();
 
     void send_init_msg(size_t qp_num);

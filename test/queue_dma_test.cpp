@@ -5,10 +5,9 @@
 
 #include "doca_wrapper/queue_dma.h"
 #include "docacxx/mem.h"
-#include "fmt/format.h"
 #include "gtest/gtest.h"
 
-constexpr char DEV_PCI_ADDR[] = "b1:00.0";
+constexpr char kDevPciAddr[] = "b1:00.0";
 using namespace pulsedb;
 
 class QueueDmaTest: public testing::Test {
@@ -17,7 +16,7 @@ public:
     static void TearDownTestSuite() {}
 
     virtual void SetUp() override {
-        docacxx::check_derr(docacxx::open_doca_device_with_pci(DEV_PCI_ADDR, &dev),
+        docacxx::check_derr(docacxx::open_doca_device_with_pci(kDevPciAddr, &dev),
             "failed to open dev");
         docacxx::check_derr(doca_pe_create(&pe), "failed to create pe");
     }

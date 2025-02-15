@@ -34,7 +34,7 @@ public:
         delete m_uring;
     }
 
-    void write_async(size_t base_size_multiplier, size_t file_number, size_t offset,
+    void write_async(size_t file_number, size_t offset, size_t base_size_multiplier,
         const RingBuffer::View &src, CallbackFn *cb) override {
         FileCtx *ctx{};
         auto iter = m_writing_files.find(file_number);

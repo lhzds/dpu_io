@@ -14,7 +14,8 @@
 
 namespace pulsedb {
 Backend::Backend(const std::string_view &name, const std::string_view &dev_pci,
-    const std::string_view &dev_rep_pci, std::unique_ptr<IoCtx> io_ctx) {
+    const std::string_view &dev_rep_pci, std::unique_ptr<IoCtx> io_ctx,
+    size_t dpu_req_rb_cap, size_t dpu_resp_rb_cap) {
     SPDLOG_INFO("backend is starting...");
     m_io_ctx = std::move(io_ctx);
 
@@ -62,11 +63,11 @@ Backend::Backend(const std::string_view &name, const std::string_view &dev_pci,
         
         // 使用 1:1 大小的队列映射
         m_qps.emplace_back(std::make_unique<DmaQpMapping>(*this, i,
-            header->host_req_mem_size,
+            dpu_req_rb_cap,
             ConstBytesView(init_qp_msg.host_req_mmap_desc, header->host_req_mmap_desc_size),
             header->host_req_mem_addr, header->host_req_mem_size,
 
-            header->host_resp_mem_size,
+            dpu_resp_rb_cap,
             ConstBytesView(init_qp_msg.host_resp_mmap_desc, header->host_resp_mmap_desc_size),
             header->host_resp_mem_addr, header->host_resp_mem_size,
 
@@ -195,8 +196,8 @@ void Backend::connect_io_and_qp(size_t qp_id, ReqRbMapping::DpuRbView &req_view)
                 auto msg = IoRespMsg::make(IoRespMsg::Type::kWrite, file_number, res);
                 m_qps[qp_id]->finish_req(req_view, std::move(msg));
             });
-            m_io_ctx->write_async(header.base_size_multiplier, header.file_number, 
-                header.offset, *write_ref->content, cb);
+            m_io_ctx->write_async(header.file_number, header.offset, 
+                header.base_size_multiplier, *write_ref->content, cb);
             break;
         }
         case IoReqMsg::Type::kSyncClose: {

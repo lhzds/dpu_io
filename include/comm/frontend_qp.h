@@ -25,8 +25,8 @@ public:
     void create_producer(Frontend &frontend);
     void create_consumer(Frontend &frontend);
 
-    void prep_write(size_t base_size_multiplier, size_t file_number, size_t offset);
-    void append_write_content(const ConstBytesView &content);
+    void prep_write(size_t file_number, size_t offset, size_t base_size_multiplier = 1);
+    void append(const ConstBytesView &content);
     void post_write();
 
     void post_sync_close(size_t file_number, bool use_fsync);

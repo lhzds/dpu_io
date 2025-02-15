@@ -75,12 +75,12 @@ void FrontendQp::post_sync_close(size_t file_number, bool use_fsync) {
     send_req_rb_new_size(req.size());
 }
 
-void FrontendQp::prep_write(size_t base_size_multiplier, size_t file_number, size_t offset) {
+void FrontendQp::prep_write(size_t file_number, size_t offset, size_t base_size_multiplier) {
     if (m_is_prep_write) {
         throw_with("already prepared write");
     }
-    IoReqMsg::init_write_req_header(m_cache_header, base_size_multiplier,
-        file_number, offset);
+    IoReqMsg::init_write_req_header(m_cache_header, file_number, offset,
+        base_size_multiplier);
     size_t new_size = sizeof(m_cache_header);
     if (m_req_rb.cap() < new_size) {
         throw_with("too large to write to rb");
@@ -94,7 +94,7 @@ void FrontendQp::prep_write(size_t base_size_multiplier, size_t file_number, siz
    m_is_prep_write = true;
 }
 
-void FrontendQp::append_write_content(const ConstBytesView &content) {
+void FrontendQp::append(const ConstBytesView &content) {
     if (not m_is_prep_write) {
         throw_with("without preparing write");
     }

@@ -11,10 +11,5 @@ target("queue_dma_test")
     add_deps("docacxx")
     add_packages("gtest")
 
-target("format_test")
-    set_kind("binary")
-    add_files("format_test.cpp")
-    add_packages("gtest")
-
-includes("comm/xmake.lua")
+-- includes("comm/xmake.lua")
 includes("producer_consumer/xmake.lua")

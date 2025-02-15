@@ -7,7 +7,6 @@
 #include <sys/wait.h>
 
 #include "bytes.h"
-#include "format.h"
 #include "comm/frontend.h"
 
 namespace pulsedb {
@@ -30,13 +29,13 @@ Frontend::Frontend(const std::string_view &backend_name, const std::string_view 
     });
     m_ctrl_client->set_recv_cb([&](doca_comch_connection *conn, uint8_t *data, uint32_t len) {
         ConstBytesView bytes((char *)data, len);
-        m_ctrl_msg_variant = CtrlMsg::read(bytes);
+        m_ctrl_msg_ref_var = CtrlMsg::read(bytes);
     });
     m_ctrl_client->start_sync();
     m_conn = m_ctrl_client->get_connection();
 
     send_init_msg(qp_num);
-    recv_ctrl_msg<CtrlMsg::AckMsg>();
+    recv_ctrl_msg<CtrlMsg::AckMsgRef>();
 
     m_qps.reserve(qp_num);
     for (size_t i{}; i < qp_num; ++i) {
@@ -46,13 +45,13 @@ Frontend::Frontend(const std::string_view &backend_name, const std::string_view 
         send_init_qp_msg(i, qp.req_rb_ref().data(), qp.req_rb_ref().cap(),
             qp.resp_rb_ref().data(), qp.resp_rb_ref().cap(),
             qp.req_mmap_ref().export_pci(m_dev), qp.resp_mmap_ref().export_pci(m_dev));
-        recv_ctrl_msg<CtrlMsg::AckMsg>();
+        recv_ctrl_msg<CtrlMsg::AckMsgRef>();
 
         qp.create_producer(*this);
         qp.create_consumer(*this);
     }
     SPDLOG_INFO("create {} qps", qp_num);
-    recv_ctrl_msg<CtrlMsg::StartCommMsg>();
+    recv_ctrl_msg<CtrlMsg::StartCommMsgRef>();
 }
 
 Frontend::~Frontend() {
@@ -69,23 +68,23 @@ Frontend::~Frontend() {
     }
 }
 
-template<class CtrlMsgType>
-CtrlMsgType Frontend::recv_ctrl_msg() {
-    while (not m_ctrl_msg_variant) {
+template<class CtrlMsgRefType>
+CtrlMsgRefType Frontend::recv_ctrl_msg() {
+    while (not m_ctrl_msg_ref_var) {
         doca_pe_progress(m_pe);
     }
 
-    auto ret = std::get<CtrlMsgType>(*m_ctrl_msg_variant);
-    m_ctrl_msg_variant = std::nullopt;
-    if constexpr (std::is_same_v<CtrlMsgType, CtrlMsg::AckMsg>) {
+    auto ret = std::get<CtrlMsgRefType>(*m_ctrl_msg_ref_var);
+    m_ctrl_msg_ref_var = std::nullopt;
+    if constexpr (std::is_same_v<CtrlMsgRefType, CtrlMsg::AckMsgRef>) {
         SPDLOG_INFO("receive ack msg");
-    } else if constexpr (std::is_same_v<CtrlMsgType, CtrlMsg::InitMsg>) {
+    } else if constexpr (std::is_same_v<CtrlMsgRefType, CtrlMsg::InitMsgRef>) {
         SPDLOG_INFO("receive init msg");
-    } else if constexpr (std::is_same_v<CtrlMsgType, CtrlMsg::InitQpMsg>) {
+    } else if constexpr (std::is_same_v<CtrlMsgRefType, CtrlMsg::InitQpMsgRef>) {
         SPDLOG_INFO("receive init_qp msg");
-    } else if constexpr (std::is_same_v<CtrlMsgType, CtrlMsg::ExitMsg>) {
+    } else if constexpr (std::is_same_v<CtrlMsgRefType, CtrlMsg::ExitMsgRef>) {
         SPDLOG_INFO("receive exit msg");
-    } else if constexpr (std::is_same_v<CtrlMsgType, CtrlMsg::StartCommMsg>) {
+    } else if constexpr (std::is_same_v<CtrlMsgRefType, CtrlMsg::StartCommMsgRef>) {
         SPDLOG_INFO("receive start_comm msg");
     }
     return ret;
@@ -135,6 +134,25 @@ size_t Frontend::recv_new_conumser_id() {
     m_new_consumer_id = std::nullopt;
     SPDLOG_INFO("receive new consumer id={}", *m_new_consumer_id);
     return ret;
+}
+
+FrontendQp *Frontend::alloc_qp() {
+    FrontendQp *ret{};
+    while (ret == nullptr) {
+      bool test = false;
+      auto &qp = *m_qps[m_start_alloc_idx];
+      if (qp.is_busy.compare_exchange_strong(test, true)) {
+        ret = &qp;
+      }
+      if ((++m_start_alloc_idx) == m_qps.size()) {
+        m_start_alloc_idx = 0;
+      }
+    }
+    return ret;
+}
+
+void free_qp(FrontendQp *qp) {
+    qp->is_busy = false;
 }
 
 } // namespace pulsedb

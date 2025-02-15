@@ -1,10 +1,11 @@
 #include "comm/backend.h"
 #include "bytes.h"
 #include "constant.h"
-#include "dma_qp_mapping.h"
+#include "comm/dma_qp_mapping.h"
 #include "docacxx/ctx/server.h"
-#include "format.h"
-#include "io/mem_io_mock.h"
+#include "format/ctrl_msg.h"
+#include "format/rb_req_resp_msg.h"
+#include "io/io_ctx.h"
 
 #include <doca_dev.h>
 #include <doca_pe.h>
@@ -13,9 +14,9 @@
 
 namespace pulsedb {
 Backend::Backend(const std::string_view &name, const std::string_view &dev_pci,
-    const std::string_view &dev_rep_pci) {
+    const std::string_view &dev_rep_pci, std::unique_ptr<IoCtx> io_ctx) {
     SPDLOG_INFO("backend is starting...");
-    m_io_ctx = std::make_unique<MemIoMock>();
+    m_io_ctx = std::move(io_ctx);
 
     docacxx::check_derr(docacxx::open_doca_device_with_pci(dev_pci.data(), &m_dev),
         "failed to open dev");
@@ -50,24 +51,26 @@ Backend::Backend(const std::string_view &name, const std::string_view &dev_pci,
         doca_pe_progress(m_pe);
     }
 
-    auto qp_num = recv_ctrl_msg<CtrlMsg::InitMsg>().header->qp_num;
+    auto qp_num = recv_ctrl_msg<CtrlMsg::InitMsgRef>().header->qp_num;
     send_ack_msg();
 
     m_qps.reserve(qp_num);
     for (size_t i{}; i < qp_num; ++i) {
-        auto init_qp_msg = recv_ctrl_msg<CtrlMsg::InitQpMsg>();
+        auto init_qp_msg = recv_ctrl_msg<CtrlMsg::InitQpMsgRef>();
         send_ack_msg();
         auto *header = init_qp_msg.header;
         
         // 使用 1:1 大小的队列映射
-        m_qps.emplace_back(std::make_unique<DmaQpMapping>(*this, i, m_io_ctx.get(), m_io_msg_queue,
+        m_qps.emplace_back(std::make_unique<DmaQpMapping>(*this, i,
             header->host_req_mem_size,
             ConstBytesView(init_qp_msg.host_req_mmap_desc, header->host_req_mmap_desc_size),
             header->host_req_mem_addr, header->host_req_mem_size,
 
             header->host_resp_mem_size,
             ConstBytesView(init_qp_msg.host_resp_mmap_desc, header->host_resp_mmap_desc_size),
-            header->host_resp_mem_addr, header->host_resp_mem_size
+            header->host_resp_mem_addr, header->host_resp_mem_size,
+
+            [&](size_t qp_id, ReqRbMapping::DpuRbView &req_view) { connect_io_and_qp(qp_id, req_view); }
         ));
 
         auto &qp = m_qps.back();
@@ -84,7 +87,7 @@ Backend::Backend(const std::string_view &name, const std::string_view &dev_pci,
         std::visit([&](const auto &msg) {
             msg_type = msg.header->type;
         }, *m_ctrl_msg_variant);
-        if (msg_type != CtrlMsg::Type::EXIT) {
+        if (msg_type != CtrlMsg::Type::kExit) {
             throw_with("wrong msg type");
         }
         SPDLOG_INFO("receive exit msg");
@@ -114,7 +117,7 @@ void Backend::run() {
     std::function<void()> msg;
     while (not m_is_exited) {
         doca_pe_progress(m_pe);
-        while (m_io_msg_queue.pop(msg)) {
+        while (m_io_mq.pop(msg)) {
             msg();
         }
     }
@@ -128,15 +131,15 @@ CtrlMsgType Backend::recv_ctrl_msg() {
 
     auto ret = std::get<CtrlMsgType>(*m_ctrl_msg_variant);
     m_ctrl_msg_variant = std::nullopt;
-    if constexpr (std::is_same_v<CtrlMsgType, CtrlMsg::AckMsg>) {
+    if constexpr (std::is_same_v<CtrlMsgType, CtrlMsg::AckMsgRef>) {
         SPDLOG_INFO("receive ack msg");
-    } else if constexpr (std::is_same_v<CtrlMsgType, CtrlMsg::InitMsg>) {
+    } else if constexpr (std::is_same_v<CtrlMsgType, CtrlMsg::InitMsgRef>) {
         SPDLOG_INFO("receive init msg");
-    } else if constexpr (std::is_same_v<CtrlMsgType, CtrlMsg::InitQpMsg>) {
+    } else if constexpr (std::is_same_v<CtrlMsgType, CtrlMsg::InitQpMsgRef>) {
         SPDLOG_INFO("receive init_qp msg");
-    } else if constexpr (std::is_same_v<CtrlMsgType, CtrlMsg::ExitMsg>) {
+    } else if constexpr (std::is_same_v<CtrlMsgType, CtrlMsg::ExitMsgRef>) {
         SPDLOG_INFO("receive exit msg");
-    } else if constexpr (std::is_same_v<CtrlMsgType, CtrlMsg::StartCommMsg>) {
+    } else if constexpr (std::is_same_v<CtrlMsgType, CtrlMsg::StartCommMsgRef>) {
         SPDLOG_INFO("receive start_comm msg");
     }
     return ret;
@@ -173,6 +176,45 @@ size_t Backend::recv_new_conumser_id() {
     m_new_consumer_id = std::nullopt;
     SPDLOG_INFO("receive new consumer id={}", *m_new_consumer_id);
     return ret;
+}
+
+void Backend::connect_io_and_qp(size_t qp_id, ReqRbMapping::DpuRbView &req_view) {
+    auto ref_var = IoReqMsg::read(req_view.inner);
+    IoReqMsg::Type type;
+    std::visit([&](const auto &r) {
+        type = r->header->type;
+    }, ref_var);
+
+    switch (type) {
+        case IoReqMsg::Type::kWrite: {
+            auto write_ref = IoReqMsg::get_req_ptr<IoReqMsg::WriteMsgRbRef>(ref_var);
+            auto &header = *write_ref->header;
+            SPDLOG_INFO("Start processing write req from qp_id={}[file_number={}, offset={}, size={}]",
+                qp_id, header.file_number, header.offset, header.size);
+            auto *cb = IoCtx::CallbackFn::make([&, file_number = header.file_number](int res) {
+                auto msg = IoRespMsg::make(IoRespMsg::Type::kWrite, file_number, res);
+                m_qps[qp_id]->finish_req(req_view, std::move(msg));
+            });
+            m_io_ctx->write_async(header.base_size_multiplier, header.file_number, 
+                header.offset, *write_ref->content, cb);
+            break;
+        }
+        case IoReqMsg::Type::kSyncClose: {
+            auto sync_close_ref = IoReqMsg::get_req_ptr<IoReqMsg::SyncCloseMsgRbRef>(ref_var);
+            auto &header = *sync_close_ref->header;
+            SPDLOG_INFO("Start processing sync close req from qp_id={}[file_number={}]",
+                qp_id, header.file_number);
+            auto *cb = IoCtx::CallbackFn::make([&, file_number = header.file_number](int res) {
+                auto msg = IoRespMsg::make(IoRespMsg::Type::kSyncClose, file_number, res);
+                m_qps[qp_id]->finish_req(req_view, std::move(msg));
+            });
+            m_io_ctx->sync_close_async(header.file_number, header.use_fsync);
+            break;
+        }
+        default: {
+            throw_with("unexpected type");
+        }
+    }
 }
 
 } // namespace pulsedb

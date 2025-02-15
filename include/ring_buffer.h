@@ -8,7 +8,6 @@
 #include <cstring>
 #include <functional>
 #include <optional>
-#include <stdexcept>
 
 namespace pulsedb {
 class RingBufferRep {
@@ -99,9 +98,7 @@ public:
     }
 
     size_t free_size() const noexcept {
-        // 减 1 目的是为了保证 head == tail 一定说明队列为空，而不可能为满
-        // 当 head == tail 时，len() 方法得到唯一结果
-        return m_cap - 1 - m_size;
+        return m_cap - m_size;
     }
 
     size_t empty() const noexcept {
@@ -114,10 +111,6 @@ public:
 
     size_t tail() const noexcept {
         return m_tail;
-    }
-
-    size_t len(size_t start, size_t end) const noexcept {
-        return (end - start) % m_cap;
     }
 
     Slice to_slice() const noexcept {
@@ -304,9 +297,9 @@ public:
         return true;
     }
 
-    View reserve_space(size_t n) {
+    std::optional<View> reserve_space(size_t n) {
         if (free_size() < n) {
-            throw std::out_of_range("out of ring buffer free space");
+            return {};
         }
         return view(*m_rep.write(n));
     }
@@ -375,10 +368,6 @@ public:
         return m_rep.tail();
     }
 
-    size_t len(size_t start, size_t end) const noexcept {
-        return m_rep.len(start, end);
-    }
-
     const RingBufferRep &rep() const {
         return m_rep;
     }
@@ -431,6 +420,12 @@ public:
             return {first_part, second_part};
         }
         return RingBufferRep::Slice(first_part);
+    }
+
+    template<typename ObjType> ObjType read_obj_copy() {
+        ObjType obj;
+        read({(char *)&obj, sizeof(obj)});
+        return obj;
     }
 
 private:

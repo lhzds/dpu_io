@@ -1,9 +1,14 @@
-#include "comm/frontend_qp.h"
+#include <cstring>
+#include <doca_pe.h>
+#include <optional>
+
 #include "bytes.h"
+#include "comm/frontend_qp.h"
 #include "constant.h"
 #include "doca_wrapper/passive_consumer.h"
-#include "format.h"
-#include <doca_pe.h>
+#include "format/rb_meta_msg.h"
+#include "format/rb_req_resp_msg.h"
+#include "util.h"
 
 namespace pulsedb {
 FrontendQp::FrontendQp(Frontend &frontend, size_t id,
@@ -35,177 +40,158 @@ void FrontendQp::create_consumer(Frontend &frontend) {
     cfg.post_recv_task_slot_num = 1;
     m_consumer = std::make_unique<PassiveConsumer>(frontend.conn(), m_pe,
         frontend.pe(), frontend.dev(), cfg, [&](const auto &view) {
-        m_is_d2h_rb_meta_msg_recved = true;
-        std::memcpy(&m_d2h_rb_meta_msg, view.data(), view.size());
+        auto *msg = (D2HRbMetaMsg *)view.data();
+
+        switch (msg->type) {
+            case D2HRbMetaMsg::Type::kReqRbCleanedSize:
+                SPDLOG_INFO("receive req rb size to clean={}", msg->payload.req_rb_cleaned_size);
+                m_req_rb_cleaned_size = msg->payload.req_rb_cleaned_size;
+                break;
+            case D2HRbMetaMsg::Type::kRespRbNewSize:
+                SPDLOG_INFO("receive resp rb new size={}", msg->payload.resp_rb_new_size);
+                m_resp_rb_new_size = msg->payload.resp_rb_new_size;
+                break;
+            default:
+                throw_with("unexpected D2HRbMetaMsg type");
+        }
     });
 }
 
-void FrontendQp::post_open(const std::string_view &filename, uint32_t open_flags, OpenCallback callback) {
-    post_request(RingBufferRequest::write_open_request, callback, filename, open_flags);
-}
-
-void FrontendQp::post_read(size_t file_id, size_t offset, size_t size, ReadCallback callback) {
-    post_request(RingBufferRequest::write_read_request, callback, file_id, offset, size);
-}
-
-void FrontendQp::post_write(size_t file_id, size_t offset, const ConstBytesView &content, WriteCallback callback) {
-    post_request(RingBufferRequest::write_write_request, callback, file_id, offset, content);
-}
-
-void FrontendQp::post_fsync(size_t file_id, FsyncCallback callback) {
-    post_request(RingBufferRequest::write_fsync_request, callback, file_id);
-}
-
-void FrontendQp::post_close(size_t file_id, CloseCallback callback) {
-    post_request(RingBufferRequest::write_close_request, callback, file_id);
-}
-
-template <typename WriteReqFunc, typename... Args, typename Callback>
-void FrontendQp::post_request(WriteReqFunc write_req_func, Callback callback, Args... args) {
-    ++m_pending_req_cnt;
-    
-    auto slot_id = find_free_req_slot();
-    m_req_slots[slot_id].m_is_free = false;
-    if (callback != nullptr) {
-        m_req_slots[slot_id].m_callback = std::move(callback);
+void FrontendQp::post_sync_close(size_t file_number, bool use_fsync) {
+    if (m_is_prep_write) {
+        throw_with("preparing write now");
     }
-    
-    while (not write_req_func(m_req_rb, slot_id, args...)) {
-        update_host_req_rb_head();
+    auto req = IoReqMsg::make_sync_close_req(file_number, use_fsync);
+    if (m_req_rb.cap() < req.size()) {
+        throw_with("too large to write to rb");
     }
-    send_host_req_rb_tail();
+
+    while (not (m_req_rb.free_size() < req.size())) {
+        free_req_rb_space(req.size());
+    }
+
+    m_req_rb.write(req);
+    ++m_submitted_req_cnt;
+    send_req_rb_new_size(req.size());
 }
 
-void FrontendQp::poll_wait() {
-    poll_wait(m_pending_req_cnt);
+void FrontendQp::prep_write(size_t base_size_multiplier, size_t file_number, size_t offset) {
+    if (m_is_prep_write) {
+        throw_with("already prepared write");
+    }
+    IoReqMsg::init_write_req_header(m_cache_header, base_size_multiplier,
+        file_number, offset);
+    size_t new_size = sizeof(m_cache_header);
+    if (m_req_rb.cap() < new_size) {
+        throw_with("too large to write to rb");
+    }
+
+    while (not (m_req_rb.free_size() < new_size)) {
+        free_req_rb_space(new_size);
+   }
+
+   m_reserved_header_space = m_req_rb.reserve_space(new_size);
+   m_is_prep_write = true;
 }
 
-void FrontendQp::poll_wait(size_t n) {
-    auto wait_req_cnt{std::min(n, m_pending_req_cnt)};
-    for (size_t i{}; i < wait_req_cnt; ++i) {
-        // 轮询等待 DPU 处理结果
-        while (m_resp_rb.empty()) {
-            update_host_resp_rb_tail();
+void FrontendQp::append_write_content(const ConstBytesView &content) {
+    if (not m_is_prep_write) {
+        throw_with("without preparing write");
+    }
+    if (m_req_rb.cap() < content.size()) {
+        throw_with("too large to write to rb");
+    }
+
+    while (not (m_req_rb.free_size() < content.size())) {
+        free_req_rb_space(content.size());
+    }
+
+    m_req_rb.write(content);
+    m_cache_header.size += content.size();
+}
+
+void FrontendQp::post_write() {
+    if (not m_is_prep_write) {
+        throw_with("without preparing write");
+    }
+    m_reserved_header_space->write({(char *)&m_cache_header, sizeof(m_cache_header)});
+    ++m_submitted_req_cnt;
+    m_is_prep_write = false;
+    send_req_rb_needed_size(sizeof(m_cache_header) + m_cache_header.size);
+}
+
+void FrontendQp::wait_all() {
+    size_t processed_size{};
+    size_t wait_req_cnt = m_submitted_req_cnt;
+
+    while (wait_req_cnt > 0) {
+        wait_new_resps(wait_req_cnt * sizeof(IoRespMsg), processed_size);
+        processed_size = 0;
+        
+        while (m_resp_rb.size() > 0) {
+            auto resp = IoRespMsg::read_from(m_resp_rb);
+            switch (resp.type) {
+                case IoRespMsg::Type::kWrite:
+                    if (resp.res < 0) {
+                        throw_with("Write error with {}: {}", resp.file_number, strerror(-resp.res));
+                    }
+                    break;
+                case IoRespMsg::Type::kSyncClose:
+                    if (resp.res < 0) {
+                        throw_with("Sync close error with {}: {}", resp.file_number, strerror(-resp.res));
+                    }
+                    break;
+                default:
+                    throw_with("unsupported type");
+            }
+            --wait_req_cnt;
+            processed_size += sizeof(IoRespMsg);
         }
-
-        auto full_view = m_resp_rb.to_view();
-        auto resp_variant = RingBufferResponse::read(full_view);
-        RingBufferResponse::Type resp_type{};
-        size_t req_id{};
-        std::visit([&resp_type, &req_id](const auto &resp) {
-            resp_type = resp->header->type;
-            req_id = resp->header->req_id;
-        }, resp_variant);
-
-        auto &req_slot = m_req_slots[req_id];
-        using RbResp = RingBufferResponse;
-        switch (resp_type) {
-            case RbResp::Type::OPEN: {
-                auto open_resp = RbResp::get_req_ptr<RingBufferResponse::OpenResponse>(resp_variant);
-                auto open_callback = std::any_cast<OpenCallback>(req_slot.m_callback);
-                open_callback(open_resp->header->error_code, open_resp->header->file_id);
-                m_resp_rb.read(open_resp->size());
-                break;
-            }
-            case RingBufferResponse::Type::CLOSE: {
-                auto close_resp = RbResp::get_req_ptr<RingBufferResponse::CloseResponse>(resp_variant);
-                auto close_callback = std::any_cast<CloseCallback>(req_slot.m_callback);
-                close_callback(close_resp->header->error_code);
-                m_resp_rb.read(close_resp->size());
-                break;
-            }
-            case RingBufferResponse::Type::READ: {
-                auto read_resp = RbResp::get_req_ptr<RingBufferResponse::ReadResponse>(resp_variant);
-                auto read_callback = std::any_cast<ReadCallback>(req_slot.m_callback);
-                read_callback(read_resp->header->error_code, read_resp->content);
-                m_resp_rb.read(read_resp->size());
-                break;
-            }
-            case RingBufferResponse::Type::WRITE: {
-                auto write_resp = RbResp::get_req_ptr<RingBufferResponse::WriteResponse>(resp_variant);
-                auto write_callback = std::any_cast<WriteCallback>(req_slot.m_callback);
-                write_callback(write_resp->header->error_code);
-                m_resp_rb.read(write_resp->size());
-                break;
-            }
-            case RingBufferResponse::Type::FSYNC: {
-                auto fsync_resp = RbResp::get_req_ptr<RingBufferResponse::FsyncResponse>(resp_variant);
-                auto fsync_callback = std::any_cast<FsyncCallback>(req_slot.m_callback);
-                fsync_callback(fsync_resp->header->error_code);
-                m_resp_rb.read(fsync_resp->size());
-                break;
-            }
-        }
-        req_slot.m_is_free = true;
-        req_slot.m_callback = std::any{};
-        // send_host_req_rb_tail();
     }
-    m_pending_req_cnt -= m_pending_req_cnt;
-    send_host_resp_rb_head();
+
+    m_submitted_req_cnt = 0;
 }
 
-void FrontendQp::send_host_req_rb_tail() {
+void FrontendQp::send_req_rb_new_size(size_t new_size) {
     auto *h2d_rb_meta_msg = (H2DRbMetaMsg *)m_producer->buf_data();
-    h2d_rb_meta_msg->type = H2DRbMetaMsg::Type::NEW_HOST_REQ_RB_TAIL;
-    h2d_rb_meta_msg->payload.new_host_req_rb_tail = m_req_rb.tail();
+    h2d_rb_meta_msg->type = H2DRbMetaMsg::Type::kReqRbNewSize;
+    h2d_rb_meta_msg->payload.req_rb_new_size = new_size;
     m_producer->send_sync(sizeof(*h2d_rb_meta_msg));
 }
 
-void FrontendQp::send_host_resp_rb_head() {
+void FrontendQp::send_req_rb_needed_size(size_t needed_size) {
     auto *h2d_rb_meta_msg = (H2DRbMetaMsg *)m_producer->buf_data();
-    h2d_rb_meta_msg->type = H2DRbMetaMsg::Type::NEW_HOST_RESP_RB_HEAD;
-    h2d_rb_meta_msg->payload.new_host_resp_rb_head = m_resp_rb.head();
+    h2d_rb_meta_msg->type = H2DRbMetaMsg::Type::kReqRbNeededSpace;
+    h2d_rb_meta_msg->payload.req_rb_needed_space = needed_size;
     m_producer->send_sync(sizeof(*h2d_rb_meta_msg));
 }
 
-void FrontendQp::update_host_req_rb_head() {
+void FrontendQp::send_wait_stat(size_t wait_size, size_t processed_size) {
+    auto *h2d_rb_meta_msg = (H2DRbMetaMsg *)m_producer->buf_data();
+    h2d_rb_meta_msg->type = H2DRbMetaMsg::Type::kWaitStat;
+    h2d_rb_meta_msg->payload.wait_stat.wait_size = wait_size;
+    h2d_rb_meta_msg->payload.wait_stat.processed_size = processed_size;
+    m_producer->send_sync(sizeof(*h2d_rb_meta_msg));
+}
+
+void FrontendQp::free_req_rb_space(size_t needed_size) {
     // 提前 submit 一个 post_recv 任务，等待获取 req_rb_head
-    m_is_d2h_rb_meta_msg_recved = false;
-
-    auto *h2d_rb_meta_msg = (H2DRbMetaMsg *)m_producer->buf_data();
-    h2d_rb_meta_msg->type = H2DRbMetaMsg::Type::REQUIRE_HOST_REQ_RB_HEAD;
-    h2d_rb_meta_msg->payload.host_req_rb_head = m_req_rb.head();
-    m_producer->send_sync(sizeof(*h2d_rb_meta_msg));
-
-    while (not m_is_d2h_rb_meta_msg_recved) {
+    m_req_rb_cleaned_size = std::nullopt;
+    send_req_rb_needed_size(needed_size);
+    while (not m_req_rb_cleaned_size) {
         doca_pe_progress(m_pe);
     }
-    if (m_d2h_rb_meta_msg.type != D2HRbMetaMsg::Type::NEW_HOST_REQ_RB_HEAD) {
-        throw_with("wrong d2h_rb_meta_msg type");
-    }
-    SPDLOG_INFO("receive new_host_req_rb_head={}", m_d2h_rb_meta_msg.payload.host_req_rb_head);
-    auto read_size = m_req_rb.len(m_req_rb.head(), m_d2h_rb_meta_msg.payload.host_req_rb_head);
-    m_req_rb.read(read_size);
+    m_req_rb.read(*m_req_rb_cleaned_size);
 }
 
-void FrontendQp::update_host_resp_rb_tail() {
+void FrontendQp::wait_new_resps(size_t wait_size, size_t processed_size) {
     // 提前 submit 一个 post_recv 任务，等待获取 req_rb_head
-    m_is_d2h_rb_meta_msg_recved = false;
-
-    auto *h2d_rb_meta_msg = (H2DRbMetaMsg *)m_producer->buf_data();
-    h2d_rb_meta_msg->type = H2DRbMetaMsg::Type::REQUIRE_HOST_RESP_RB_TAIL;
-    h2d_rb_meta_msg->payload.host_resp_rb_tail = m_resp_rb.tail();
-    m_producer->send_sync(sizeof(*h2d_rb_meta_msg));
-
-    while (not m_is_d2h_rb_meta_msg_recved) {
+    m_resp_rb_new_size = std::nullopt;
+    send_wait_stat(wait_size, processed_size);
+    while (not m_resp_rb_new_size) {
         doca_pe_progress(m_pe);
     }
-    if (m_d2h_rb_meta_msg.type != D2HRbMetaMsg::Type::NEW_HOST_RESP_RB_TAIL) {
-        throw_with("wrong d2h_rb_meta_msg type");
-    }
-    SPDLOG_INFO("receive new_host_resp_rb_tail={}", m_d2h_rb_meta_msg.payload.host_resp_rb_tail);
-    auto write_size = m_resp_rb.len(m_resp_rb.tail(), m_d2h_rb_meta_msg.payload.host_resp_rb_tail);
-    m_resp_rb.rep().write(write_size);
-}
-
-size_t FrontendQp::find_free_req_slot() {
-    for (size_t i{}; i < m_req_slots.size(); ++i) {
-        if (m_req_slots[i].m_is_free) {
-            return i;
-        }
-    }
-    m_req_slots.emplace_back();
-    return m_req_slots.size() - 1;
+    m_resp_rb.rep().write(*m_resp_rb_new_size);
 }
 
 } // namespace pulsedb

@@ -5,25 +5,23 @@
 #include <string_view>
 
 #include "bytes.h"
-#include "../../../dpu/dma_qp_mapping.h"
+#include "comm/dma_qp_mapping.h"
 #include "doca_wrapper/queue_dma.h"
-#include "format.h"
+#include "format/ctrl_msg.h"
 #include "io/io_ctx.h"
 #include "noncopyable.h"
 #include "types.h"
 
 namespace pulsedb {
-class DmaQpMapping;
-
 /* 
  * 单线程负责控制路径 + 轮询异步的数据操作
- * (其中，dma数据操作卸载到硬件上，文件IO操作使用基于spdk rte模型异步化的bolbfs）
+ * (其中，dma数据操作卸载到硬件上，文件IO使用基于 iouring 的异步模型）
  * 问题：buf_inv 分配回收的开销？如何优雅地进行批量传输与空间分配回收？
  */
 class Backend: Noncopyable {
 public:
     Backend(const std::string_view &name, const std::string_view &dev_pci,
-        const std::string_view &dev_rep_pci);
+        const std::string_view &dev_rep_pci, std::unique_ptr<IoCtx> io_ctx);
     ~Backend();
 
     void run();
@@ -43,8 +41,10 @@ public:
 private:
     void send_ctrl_msg(const ConstBytesView &raw_msg);
 
+    void connect_io_and_qp(size_t qp_id, ReqRbMapping::DpuRbView &req_view);
+
     std::unique_ptr<IoCtx> m_io_ctx;
-    MsgQueue m_io_msg_queue;
+    MsgQueue m_io_mq;
 
     bool m_is_exited{};
     doca_dev *m_dev{};
@@ -58,7 +58,8 @@ private:
 
     // tmp var for callback
     bool m_is_ctrl_msg_sended{};
-    std::optional<CtrlMsg::Variant> m_ctrl_msg_variant{};
+    std::optional<CtrlMsg::RefVariant> m_ctrl_msg_variant{};
     std::optional<size_t> m_new_consumer_id{};
 };
-}
+
+} // pulsedb

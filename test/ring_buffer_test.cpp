@@ -48,26 +48,12 @@ TEST(RingBufferTest, RepTest2) {
     }
 }
 
-TEST(RingBufferTest, RepTest3) {
-    RingBufferRep rep(RING_BUFFER_CAP);
-    
-    rep.write(RING_BUFFER_CAP / 2);
-    rep.read(RING_BUFFER_CAP / 2);
-    ASSERT_EQ(rep.head(), RING_BUFFER_CAP / 2);
-    ASSERT_EQ(rep.tail(), RING_BUFFER_CAP / 2);
-
-    auto new_tail = RING_BUFFER_CAP / 4;
-    auto write_size = rep.len(rep.tail(), new_tail);
-    ASSERT_EQ(write_size, 3 * RING_BUFFER_CAP / 4);
-}
-
 TEST(RingBufferTest, RbTest1) {
     RingBuffer rb(RING_BUFFER_CAP);
     
     rb.rep().write(RING_BUFFER_CAP / 2 + 2);
     rb.rep().read(RING_BUFFER_CAP / 2 + 2);
 
-    // 减一是因为有一个字节被占用了，无法完整地使用
     for (size_t i{}; i < RING_BUFFER_CAP / sizeof(size_t) - 1; ++i) {
         rb.write({(char *)&i, sizeof(size_t)});
     }

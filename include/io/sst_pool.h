@@ -12,7 +12,7 @@ namespace pulsedb {
 class SstPool {
 public:
   SstPool(std::string sst_dir,
-    size_t base_pool_size, size_t max_num_mems_in_flush, size_t big_pool_size,
+    size_t base_pool_size, size_t big_pool_cnt, size_t big_pool_size,
     size_t file_size_base, size_t sst_pad_len);
   
   std::optional<size_t> alloc_slot(size_t file_number, size_t base_size_multiplier);
@@ -22,11 +22,13 @@ public:
     return m_sst_dir + "/" + std::to_string(slot_id);
   }
 
-protected:
-  void free_slot_impl(std::unordered_map<size_t, size_t>::iterator iter);
+  static void create_ssts(const std::string &sst_dir,
+                          size_t base_pool_size, size_t big_pool_cnt, size_t big_pool_size,
+                          size_t file_size_base, size_t sst_pad_len);
 
-  void create_ssts();
-  void create_same_size_ssts(size_t file_cnt, size_t file_size, size_t start_id);
+protected:
+  static void create_same_size_ssts(const std::string &sst_dir, size_t file_cnt,
+                                    size_t file_size, size_t start_id);
 
   std::pair<size_t, size_t> slot_id_range_of(size_t pool_id) const;
   size_t pool_id_of(size_t slot_id) const;

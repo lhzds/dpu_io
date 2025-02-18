@@ -6,16 +6,16 @@ if is_mode("debug") then
 end
 add_defines("SPDLOG_FMT_EXTERNAL")
 
-add_requires("fmt 9.1.0", "spdlog", "boost")
-add_packages("fmt", "spdlog", "boost")
+add_requires("fmt 9.1.0", "spdlog", "boost", "argparse")
+add_packages("fmt", "spdlog", "boost", "argparse")
 
 add_ldflags("-luring")
 
 add_includedirs("include")
 
 includes("deps/docacxx/xmake.lua")
-includes("host/xmake.lua")
-includes("dpu/xmake.lua")
+includes("src/host/xmake.lua")
+includes("src/dpu/xmake.lua")
 
 includes("exp/xmake.lua")
 includes("test/xmake.lua")

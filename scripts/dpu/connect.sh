@@ -1,7 +1,7 @@
 #!/bin/bash
 
-DEV_PATH=/dev/nvme1n1
-MNT_POINT=/home/ubuntu/mnt/remote/57-nvme3n1
+DEV_PATH=/dev/nvme1n2
+MNT_POINT=/home/olh/mnt/57-nvme3n1
 
 SUBSYSTEM_NAME="test"
 PORT_NUM="4420" # 端口号

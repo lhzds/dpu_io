@@ -4,6 +4,8 @@
 #include <cstring>
 #include <fcntl.h>
 #include <filesystem>
+#include <string>
+#include <sys/stat.h>
 
 namespace pulsedb {
 SstPool::SstPool(std::string sst_dir, size_t base_pool_size,
@@ -12,8 +14,6 @@ SstPool::SstPool(std::string sst_dir, size_t base_pool_size,
     : m_sst_dir(std::move(sst_dir)), m_base_pool_size(base_pool_size),
       m_big_pool_cnt(big_pool_cnt), m_big_pool_size(big_pool_size),
       m_file_size_base(file_size_base), m_sst_pad_len(sst_pad_len) {
-  create_ssts();
-
   m_slots.resize(slot_cnt());
   m_used_cnts.resize(pool_cnt());
   m_avail_slots.resize(pool_cnt());
@@ -27,17 +27,17 @@ SstPool::SstPool(std::string sst_dir, size_t base_pool_size,
   }
 }
 
-void SstPool::create_same_size_ssts(size_t file_cnt, size_t file_size,
-                                    size_t start_id) {
+void SstPool::create_same_size_ssts(const std::string &sst_dir, size_t file_cnt,
+                                    size_t file_size, size_t start_id) {
   BytesBuffer buf;
 
   for (size_t i{}; i < file_cnt; ++i) {
-    auto sst_name = slot_file_name(start_id + i);
+    auto sst_name = sst_dir + "/" + std::to_string(start_id + i);
     if (std::filesystem::exists(sst_name)) {
       continue;
     }
 
-    int fd = open(sst_name.c_str(), O_WRONLY, 0644);
+    int fd = open(sst_name.c_str(), O_WRONLY | O_CREAT, 0666);
     if (fd < 0) {
       throw_with("Failed to open {}: {}", sst_name, strerror(errno));
     }
@@ -63,18 +63,21 @@ void SstPool::create_same_size_ssts(size_t file_cnt, size_t file_size,
   }
 }
 
-void SstPool::create_ssts() {
+void SstPool::create_ssts(const std::string &sst_dir,
+    size_t base_pool_size, size_t big_pool_cnt, size_t big_pool_size,
+    size_t file_size_base, size_t sst_pad_len) {
+  umask(0);
   // 创建 base pool 的文件
-  create_same_size_ssts(m_base_pool_size, m_file_size_base + m_sst_pad_len, 0);
+  create_same_size_ssts(sst_dir, base_pool_size, file_size_base + sst_pad_len, 0);
 
   // 创建 big pool 的文件
-  size_t start_id = m_base_pool_size;
-  size_t file_size = 2 * m_file_size_base + m_sst_pad_len;
-  for (size_t i{}; i < m_big_pool_cnt; ++i) {
-    create_same_size_ssts(m_big_pool_size, file_size, start_id);
+  size_t start_id = base_pool_size;
+  size_t file_size = 2 * file_size_base + sst_pad_len;
+  for (size_t i{}; i < big_pool_cnt; ++i) {
+    create_same_size_ssts(sst_dir, big_pool_size, file_size, start_id);
 
-    start_id += m_big_pool_size;
-    file_size += m_file_size_base;
+    start_id += big_pool_size;
+    file_size += file_size_base;
   }
 }
 

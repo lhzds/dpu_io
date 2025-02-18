@@ -1,6 +1,6 @@
 #! /bin/bash
 
-DEV_PATH=/dev/nvme2n1
+DEV_PATH=/dev/nvme3n1
 MNT_POINT=/home/olh/mnt/local/$(basename $DEV_PATH)
 
 sudo umount "$MNT_POINT"

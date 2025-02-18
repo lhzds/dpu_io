@@ -1,0 +1,13 @@
+#!/bin/bash
+
+SST_POOL_DIR="/home/olh/mnt/local/nvme3n1"
+BASE_POOL_SIZE=10
+BIG_POOL_CNT=0
+BIG_POOL_SIZE=0
+FILE_SIZE_BASE=67108864
+SST_PAD_LEN=1048576
+
+export XMAKE_ROOT=y
+
+xmake run create_sst_pool -d $SST_POOL_DIR -s $BASE_POOL_SIZE -C $BIG_POOL_CNT \
+    -S $BIG_POOL_SIZE  -b $FILE_SIZE_BASE -p $SST_PAD_LEN

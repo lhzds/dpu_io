@@ -121,7 +121,7 @@ void DmaQpMapping::recv_h2d_rb_meta_msg(const ConstBytesView &raw_msg) {
         }
         case Type::kWaitStat: {
             auto wait_stat = msg->payload.wait_stat;
-            SPDLOG_INFO("receive wait_stat[processed={}, wait={}]",
+            SPDLOG_INFO("receive wait_stat[processed={}, wait_size={}]",
                 wait_stat.processed_size, wait_stat.wait_size);
             m_resp_rb_mapping.receive_wait_stat(wait_stat.processed_size, wait_stat.wait_size);
             break;

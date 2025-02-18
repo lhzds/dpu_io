@@ -127,7 +127,6 @@ void FrontendQp::post_write() {
 void FrontendQp::wait_all() {
     size_t processed_size{};
     size_t wait_req_cnt = m_submitted_req_cnt;
-
     while (wait_req_cnt > 0) {
         wait_new_resps(wait_req_cnt * sizeof(IoRespMsg), processed_size);
         processed_size = 0;
@@ -194,11 +193,15 @@ void FrontendQp::free_req_rb_space(size_t needed_size) {
 
 void FrontendQp::wait_new_resps(size_t wait_size, size_t processed_size) {
     // 提前 submit 一个 post_recv 任务，等待获取 req_rb_head
+    SPDLOG_INFO("send wait stat[wait_size={}, processed_size={}]",
+        wait_size, processed_size);
     m_resp_rb_new_size = std::nullopt;
     send_wait_stat(wait_size, processed_size);
     while (not m_resp_rb_new_size) {
         doca_pe_progress(m_pe);
     }
+    SPDLOG_INFO("receive new resps with size={}",
+        *m_resp_rb_new_size);
     m_resp_rb.rep().write(*m_resp_rb_new_size);
 }
 

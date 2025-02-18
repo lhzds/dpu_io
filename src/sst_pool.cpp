@@ -85,7 +85,7 @@ std::optional<size_t> SstPool::alloc_slot(size_t file_number,
                                           size_t base_size_multiplier) {
   assert(base_size_multiplier >= 1);
   size_t pool_id = base_size_multiplier - 1;
-  assert(pool_id < PoolCnt());
+  assert(pool_id < pool_cnt());
   if (m_avail_slots[pool_id].empty()) {
     return {};
   }
@@ -113,7 +113,7 @@ void SstPool::free_slot(size_t file_number) {
 }
 
 std::pair<size_t, size_t> SstPool::slot_id_range_of(size_t pool_id) const {
-  assert(pool_id < PoolCnt());
+  assert(pool_id < pool_cnt());
 
   if (pool_id == 0) {
     return {0, m_base_pool_size};

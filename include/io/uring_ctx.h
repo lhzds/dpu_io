@@ -161,12 +161,17 @@ private:
         io_uring_cqe *cqe{};
         while (not m_is_killed) {
             if (auto ret = io_uring_wait_cqe(m_uring, &cqe); ret < 0) {
-                throw_with(fmt::format("Wait cqe: {}", strerror(errno)));
+                throw_with("Wait cqe: {}", strerror(errno));
+            }
+            if (cqe->res < 0) {
+                throw_with("Io error: {}", strerror(-cqe->res));
             }
 
             std::unique_ptr<IoData> io_data;
             io_data.reset((IoData *)cqe->user_data);
             io_uring_cqe_seen(m_uring, cqe);
+
+            if (not io_data) continue;
 
             if (io_data->cb != nullptr) {
                 io_data->cb->operator()(cqe->res);

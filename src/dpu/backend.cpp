@@ -190,9 +190,11 @@ void Backend::connect_io_and_qp(size_t qp_id, ReqRbMapping::DpuRbView &req_view)
         case IoReqMsg::Type::kWrite: {
             auto write_ref = IoReqMsg::get_req_ptr<IoReqMsg::WriteMsgRbRef>(ref_var);
             auto &header = *write_ref->header;
-            SPDLOG_INFO("Start processing write req from qp_id={}[file_number={}, offset={}, size={}]",
-                qp_id, header.file_number, header.offset, header.size);
+            SPDLOG_INFO("start processing write req[file_number={}, offset={}, size={}] from qp_id={}",
+                header.file_number, header.offset, header.size, qp_id);
             auto *cb = IoCtx::CallbackFn::make([&, file_number = header.file_number](int res) {
+                SPDLOG_INFO("finish processing write req[file_number={}] from qp_id={}",
+                    file_number, qp_id);
                 auto msg = IoRespMsg::make(IoRespMsg::Type::kWrite, file_number, res);
                 m_qps[qp_id]->finish_req(req_view, std::move(msg));
             });
@@ -203,9 +205,11 @@ void Backend::connect_io_and_qp(size_t qp_id, ReqRbMapping::DpuRbView &req_view)
         case IoReqMsg::Type::kSyncClose: {
             auto sync_close_ref = IoReqMsg::get_req_ptr<IoReqMsg::SyncCloseMsgRbRef>(ref_var);
             auto &header = *sync_close_ref->header;
-            SPDLOG_INFO("Start processing sync close req from qp_id={}[file_number={}]",
-                qp_id, header.file_number);
+            SPDLOG_INFO("Start processing sync close req[file_number={}] from qp_id={}",
+                header.file_number, qp_id);
             auto *cb = IoCtx::CallbackFn::make([&, file_number = header.file_number](int res) {
+                SPDLOG_INFO("finish processing sync close req[file_number={}] from qp_id={}",
+                    file_number, qp_id);
                 auto msg = IoRespMsg::make(IoRespMsg::Type::kSyncClose, file_number, res);
                 m_qps[qp_id]->finish_req(req_view, std::move(msg));
             });

@@ -30,6 +30,7 @@ TEST_F(FrontendTest, SimpleWrite) {
     std::string target = "Hello, world!";
     qp->append(target);
     qp->post_write();
+    qp->post_sync_close(1, false);
     qp->wait_all();
 
     std::string slot_fname = kHostSstPoolDir + "/0";

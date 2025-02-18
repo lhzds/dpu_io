@@ -68,6 +68,7 @@ public:
     }
 
     void read_async(size_t size) {
+        SPDLOG_INFO("receive new_size={} from host_req_rb", size);
         auto hs = *m_host_rb_rep.write(size);
         // 用于判断 dpu_req_rb 是否有空间，否则放入等待队列
         auto cond = [&, expected_size = size]() -> bool { 
@@ -106,13 +107,17 @@ public:
     }
 
     void receive_needed_size(size_t size) {
+        SPDLOG_INFO("receive needed_space={} from host_req_rb", size);
         m_host_needed_size = size;
         try_send_cleaned_size();
     }
 
     void invalid_dpu_view(DpuRbView &dpu_rb_view) {
+        auto dpu_rb_slice = m_dpu_rb.slice(dpu_rb_view.inner);
+        SPDLOG_INFO("dpu_req_rb slice[offset={}, size={}] is invalided",
+            dpu_rb_slice.first_part().offset, dpu_rb_slice.size());
+        
         dpu_rb_view.status = DpuRbViewStatus::kInvalided;
-
         for (auto iter = m_dpu_rb_views.begin(); iter != m_dpu_rb_views.end();
             iter = m_dpu_rb_views.erase(iter)) {
             if (iter->status != DpuRbViewStatus::kInvalided) {
@@ -134,6 +139,7 @@ private:
             d2h_rb_meta_msg->payload.req_rb_cleaned_size = m_host_size_cleaned;
             auto ret = m_producer->try_submit_send_task(sizeof(*d2h_rb_meta_msg));
             assert(ret);
+            SPDLOG_INFO("send cleaned_size={} to host_req_rb", m_host_size_cleaned);
             
             m_host_rb_rep.read(m_host_size_cleaned);
             m_host_size_cleaned = 0;
@@ -159,9 +165,14 @@ public:
         kDmaDone
     };
     using DpuRbView = RbViewWithStatus<DpuRbViewStatus>;
-    using RbMapping::RbMapping;
+    RespRbMapping(size_t id, doca_dev *dev, size_t dpu_rb_cap, ConstBytesView host_mmap_desc,
+        char *host_mem_addr, size_t host_mem_size, QueueDma *dma)
+        : RbMapping(id, dev, dpu_rb_cap, host_mmap_desc,
+            host_mem_addr, host_mem_size, dma), m_dmaing_host_rb_rep(host_mem_size) {}
 
     void append(BytesBuffer data) {
+        SPDLOG_INFO("try to append data[size={}] to dpu_resp_rb[free_space={}]",
+            data.size(), m_dpu_rb.free_size());
         auto cond = [&, expected_size=data.size()] {
             return m_dpu_rb.free_size() >= expected_size;
         };
@@ -175,6 +186,8 @@ public:
     }    
 
     void receive_wait_stat(size_t processed_size, size_t wait_size) {
+        SPDLOG_INFO("receive wait_stat[processed={}, wait_size={}]",
+            processed_size, wait_size);
         m_host_rb_rep.read(processed_size);
         m_dmaing_host_rb_rep.read(processed_size);
         // 执行 host 队列空间等待任务
@@ -186,6 +199,9 @@ public:
 
 private:
     void start_dma(DpuRbView &dpu_rb_view) {
+        SPDLOG_INFO("try to start dma to transfer data[size={}] "
+            "to host_resp_rb[free_space={}]",
+            dpu_rb_view.inner.size(), m_dmaing_host_rb_rep.free_size());
         auto cond = [&, expected_size = dpu_rb_view.inner.size()]() -> bool {
             return m_dmaing_host_rb_rep.free_size() >= expected_size;
         };
@@ -197,6 +213,8 @@ private:
             m_dma->post_memcpyv(*m_dpu_mmap, *m_host_mmap,
                 make_memcpy_segs(ds, hs), 
                 [&] {
+                    SPDLOG_INFO("success transferring data[size={}] to host_resp_rb",
+                        dpu_rb_view.inner.size());
                     dpu_rb_view.status = DpuRbViewStatus::kDmaDone;
                     for (auto iter = m_dpu_rb_views.begin(); iter != m_dpu_rb_views.end();
                         iter = m_dpu_rb_views.erase(iter)) {
@@ -225,6 +243,7 @@ private:
             d2h_rb_meta_msg->payload.resp_rb_new_size = target;
             auto ret = m_producer->try_submit_send_task(sizeof(*d2h_rb_meta_msg));
             assert(ret);
+            SPDLOG_INFO("send dma_done_size={} to host_resp_rb", target);
 
             m_host_rb_rep.write(target);
             m_dma_done_size -= target;
@@ -233,19 +252,13 @@ private:
     }
 
     // 因为用了结构化绑定，因此修改成员顺序时注意对结构化绑定顺序也进行调整
-    RingBufferRep m_host_rb_rep{}; // 远程环形队列的元信息
     size_t m_dma_done_size{};
     size_t m_host_wait_size{};
+    RingBufferRep m_dmaing_host_rb_rep;
 
-    RingBufferRep m_dmaing_host_rb_rep{};
-
-    RingBuffer m_dpu_rb{}; // 本地环形队列
     std::list<DpuRbView> m_dpu_rb_views; // 记录处于消息队列中的所有不定长消息
-
     EventQueue m_dpu_rb_space_wait_eq; // 存储因目前本地队列空间不足而等待进行的事件
     EventQueue m_host_rb_space_wait_eq; // 存储因远端队列空间不足而等待的事件
-    std::unique_ptr<docacxx::Mmap> m_dpu_mmap; // 本地内存
-    std::unique_ptr<docacxx::Mmap> m_host_mmap; // 远程内存
 };
 
 class DmaQpMapping {

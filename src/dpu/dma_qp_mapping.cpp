@@ -74,7 +74,11 @@ DmaQpMapping::DmaQpMapping(Backend &backend, size_t id,
         host_req_mem_addr, host_req_mem_size, backend.dma()),
     m_resp_rb_mapping(id, backend.dev(), dpu_resp_rb_cap, host_resp_mmap_desc,
         host_resp_mem_addr, host_resp_mem_size, backend.dma()) {
-    SPDLOG_INFO("create a dma_qp_mapping[id={}]", m_id);
+    SPDLOG_INFO("create a dma_qp_mapping with id={}"
+        "[dpu_req_rb_cap={}, host_req_rb_cap={}, "
+        "dpu_resp_rb_cap={}, host_resp_rb_cap={}", m_id,
+        dpu_req_rb_cap, host_req_mem_size,
+        dpu_resp_rb_cap, host_resp_mem_size);
     m_req_rb_mapping.set_dma_done_cb(std::move(req_dma_done_cb));
 }
 
@@ -109,20 +113,16 @@ void DmaQpMapping::recv_h2d_rb_meta_msg(const ConstBytesView &raw_msg) {
     switch (msg->type) {
         case Type::kReqRbNewSize: {
             size_t new_size = msg->payload.req_rb_new_size;
-            SPDLOG_INFO("receive req_rb_new_size={}", new_size);
             m_req_rb_mapping.read_async(new_size);
             break;
         }
         case Type::kReqRbNeededSpace: {
             size_t needed_size = msg->payload.req_rb_needed_space;
-            SPDLOG_INFO("receive req_rb_needed_space={}", needed_size);
             m_req_rb_mapping.receive_needed_size(needed_size);
             break;
         }
         case Type::kWaitStat: {
             auto wait_stat = msg->payload.wait_stat;
-            SPDLOG_INFO("receive wait_stat[processed={}, wait_size={}]",
-                wait_stat.processed_size, wait_stat.wait_size);
             m_resp_rb_mapping.receive_wait_stat(wait_stat.processed_size, wait_stat.wait_size);
             break;
         }

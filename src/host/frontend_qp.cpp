@@ -66,12 +66,13 @@ void FrontendQp::post_sync_close(size_t file_number, bool use_fsync) {
         throw_with("too large to write to rb");
     }
 
-    while (not (m_req_rb.free_size() < req.size())) {
+    while (m_req_rb.free_size() < req.size()) {
         free_req_rb_space(req.size());
     }
 
     m_req_rb.write(req);
     ++m_submitted_req_cnt;
+    SPDLOG_INFO("post a sync close request with size={}[file_num={}]", req.size(), file_number);
     send_req_rb_new_size(req.size());
 }
 
@@ -86,7 +87,7 @@ void FrontendQp::prep_write(size_t file_number, size_t offset, size_t base_size_
         throw_with("too large to write to rb");
     }
 
-    while (not (m_req_rb.free_size() < new_size)) {
+    while (m_req_rb.free_size() < new_size) {
         free_req_rb_space(new_size);
    }
 
@@ -102,7 +103,7 @@ void FrontendQp::append(const ConstBytesView &content) {
         throw_with("too large to write to rb");
     }
 
-    while (not (m_req_rb.free_size() < content.size())) {
+    while (m_req_rb.free_size() < content.size()) {
         free_req_rb_space(content.size());
     }
 
@@ -117,7 +118,10 @@ void FrontendQp::post_write() {
     m_reserved_header_space->write({(char *)&m_cache_header, sizeof(m_cache_header)});
     ++m_submitted_req_cnt;
     m_is_prep_write = false;
-    send_req_rb_needed_size(sizeof(m_cache_header) + m_cache_header.size);
+    SPDLOG_INFO("post a write request with size={}[file_num={}, offset={}, write_size={}]",
+        sizeof(m_cache_header) + m_cache_header.size, m_cache_header.file_number,
+        m_cache_header.offset, m_cache_header.size);
+    send_req_rb_new_size(sizeof(m_cache_header) + m_cache_header.size);
 }
 
 void FrontendQp::wait_all() {
@@ -132,11 +136,13 @@ void FrontendQp::wait_all() {
             auto resp = IoRespMsg::read_from(m_resp_rb);
             switch (resp.type) {
                 case IoRespMsg::Type::kWrite:
+                    SPDLOG_INFO("recvive a write response [file_num={}]", resp.file_number);
                     if (resp.res < 0) {
                         throw_with("Write error with {}: {}", resp.file_number, strerror(-resp.res));
                     }
                     break;
                 case IoRespMsg::Type::kSyncClose:
+                    SPDLOG_INFO("recvive a sync close response [file_num={}]", resp.file_number);
                     if (resp.res < 0) {
                         throw_with("Sync close error with {}: {}", resp.file_number, strerror(-resp.res));
                     }
@@ -176,6 +182,8 @@ void FrontendQp::send_wait_stat(size_t wait_size, size_t processed_size) {
 
 void FrontendQp::free_req_rb_space(size_t needed_size) {
     // 提前 submit 一个 post_recv 任务，等待获取 req_rb_head
+    SPDLOG_INFO("free_space={} is not enough, send needed_size={}",
+        m_req_rb.free_size(), needed_size);
     m_req_rb_cleaned_size = std::nullopt;
     send_req_rb_needed_size(needed_size);
     while (not m_req_rb_cleaned_size) {

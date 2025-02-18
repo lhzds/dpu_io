@@ -41,7 +41,7 @@ public:
         if (iter == m_writing_files.end()) {
             ctx = init_write_ctx(file_number, base_size_multiplier);
         } else {
-            ctx = &iter->second;
+            ctx = iter->second.get();
         }
 
         ++ctx->write_cnt;
@@ -56,7 +56,7 @@ public:
     void sync_close_async(size_t file_number, bool use_fsync, CallbackFn *cb) override {
         auto iter = m_writing_files.find(file_number);
         assert(iter != m_writing_files.end());
-        FileCtx *ctx = &iter->second;
+        FileCtx *ctx = iter->second.get();
         
         // 先产生 sync_close_req，再查询 write_cnt，避免执行丢失
         // 保证前台线程和后台线程至少有一个提交 sync_close_req
@@ -84,20 +84,20 @@ private:
 
 
     FileCtx *init_write_ctx(size_t file_number, size_t base_size_multiplier) {
-        FileCtx ctx;
-        ctx.file_number = file_number;
+        auto ctx = std::make_unique<FileCtx>();
+        ctx->file_number = file_number;
 
         auto slot_id = m_sst_pool->alloc_slot(file_number, base_size_multiplier);
         assert(slot_id.has_value());
         auto sst_name = m_sst_pool->slot_file_name(*slot_id);
-        ctx.os_fd = open(sst_name.c_str(), O_WRONLY);
-        if (ctx.os_fd < 0) {
+        ctx->os_fd = open(sst_name.c_str(), O_WRONLY);
+        if (ctx->os_fd < 0) {
             throw_with("Failed to open {}: {}", sst_name, strerror(errno));
         }
 
-        auto [iter, success] = m_writing_files.emplace(file_number, ctx);
+        auto [iter, success] = m_writing_files.emplace(file_number, std::move(ctx));
         assert(success);
-        return &iter->second;
+        return iter->second.get();
     }
 
     void try_issue_sync_close(FileCtx *ctx) {
@@ -192,7 +192,7 @@ private:
 
     io_uring *m_uring{};
     std::unique_ptr<SstPool> m_sst_pool;
-    std::map<size_t, FileCtx> m_writing_files;
+    std::map<size_t, std::unique_ptr<FileCtx>> m_writing_files;
 };
 
 } // namespace pulsedb

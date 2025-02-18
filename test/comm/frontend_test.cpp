@@ -32,7 +32,7 @@ TEST_F(FrontendTest, SimpleWrite) {
     qp->post_write();
     qp->wait_all();
 
-    std::string slot_fname = kSstDir + "/0";
+    std::string slot_fname = kHostSstPoolDir + "/0";
     int fd = open(slot_fname.c_str(), O_DIRECT | O_RDONLY);
     if (fd < 0) {
         throw_with("Failed to open {}: {}", slot_fname, strerror(errno));

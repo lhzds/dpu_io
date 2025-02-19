@@ -24,10 +24,10 @@ struct CtrlMsg {
         Type type{};
     };
     struct InitHeader: CommonHeader {
-        uint32_t qp_num{};
+        int qp_num{};
     };
     struct InitQpHeader: CommonHeader {
-        size_t qp_id{};
+        int qp_id{-1};
         
         char *host_req_mem_addr{};
         size_t host_req_mem_size{};
@@ -60,7 +60,7 @@ struct CtrlMsg {
     };
     using RefVariant = std::variant<InitMsgRef, InitQpMsgRef, StartCommMsgRef, ExitMsgRef, AckMsgRef>;
 
-    static BytesBuffer make_init_msg(size_t qp_num) {
+    static BytesBuffer make_init_msg(int qp_num) {
         BytesBuffer buf(sizeof(InitHeader));
         auto *header = (InitHeader *)buf.data();
         header->type = Type::kInit;
@@ -68,7 +68,7 @@ struct CtrlMsg {
         return buf;
     }
 
-    static BytesBuffer make_init_qp_msg(size_t qp_id,
+    static BytesBuffer make_init_qp_msg(int qp_id,
         char *host_req_mem_addr, size_t host_req_mem_size,
         char *host_resp_mem_addr, size_t host_resp_mem_size,
         const ConstBytesView &host_req_mmap_desc,

@@ -27,7 +27,7 @@ public:
 
 class RbMapping {
 public:    
-    RbMapping(size_t id, doca_dev *dev, size_t dpu_rb_cap, ConstBytesView host_mmap_desc,
+    RbMapping(int id, doca_dev *dev, size_t dpu_rb_cap, ConstBytesView host_mmap_desc,
         char *host_mem_addr, size_t host_mem_size, QueueDma *dma)
         : m_id(id), m_dpu_rb(dpu_rb_cap), m_host_rb_rep(host_mem_size), m_dma(dma) {
         m_dpu_mmap = std::make_unique<docacxx::Mmap>(dev, m_dpu_rb.data(), dpu_rb_cap);
@@ -41,7 +41,7 @@ public:
         RingBufferRep::Slice dst);
 
 protected:
-    size_t m_id{};
+    int m_id{};
 
     RingBuffer m_dpu_rb{}; // 本地环形队列
     RingBufferRep m_host_rb_rep{}; // 远程环形队列的元信息（基于远端消息进行更新）
@@ -61,7 +61,7 @@ public:
     };
     using RbMapping::RbMapping;
     using DpuRbView = RbViewWithStatus<DpuRbViewStatus>;
-    using DmaDoneCb = std::function<void(size_t, DpuRbView &)>;
+    using DmaDoneCb = std::function<void(int, DpuRbView &)>;
 
     void set_dma_done_cb(DmaDoneCb cb) {
         m_dma_done_cb = std::move(cb);
@@ -154,7 +154,7 @@ private:
     std::list<DpuRbView> m_dpu_rb_views; // 记录处于消息队列中的所有不定长消息
     EventQueue m_dpu_rb_space_wait_eq; // 存储因目前本地队列空间不足而等待进行的事件
 
-    std::function<void(size_t, DpuRbView &)> m_dma_done_cb;
+    DmaDoneCb m_dma_done_cb;
 };
 
 class RespRbMapping: public RbMapping {
@@ -165,7 +165,7 @@ public:
         kDmaDone
     };
     using DpuRbView = RbViewWithStatus<DpuRbViewStatus>;
-    RespRbMapping(size_t id, doca_dev *dev, size_t dpu_rb_cap, ConstBytesView host_mmap_desc,
+    RespRbMapping(int id, doca_dev *dev, size_t dpu_rb_cap, ConstBytesView host_mmap_desc,
         char *host_mem_addr, size_t host_mem_size, QueueDma *dma)
         : RbMapping(id, dev, dpu_rb_cap, host_mmap_desc,
             host_mem_addr, host_mem_size, dma), m_dmaing_host_rb_rep(host_mem_size) {}
@@ -265,7 +265,7 @@ class DmaQpMapping {
 public:
     using DmaDoneCb = ReqRbMapping::DmaDoneCb;
 
-    DmaQpMapping(Backend &backend, size_t id,
+    DmaQpMapping(Backend &backend, int id,
         size_t dpu_req_rb_cap, ConstBytesView host_req_mmap_desc, 
         char *host_req_mem_addr, size_t host_req_mem_size,
         size_t dpu_resp_rb_cap, ConstBytesView host_resp_mmap_desc,
@@ -281,7 +281,7 @@ public:
 private:
     void recv_h2d_rb_meta_msg(const ConstBytesView &raw_msg);
 
-    size_t m_id{};
+    int m_id{};
 
     ReqRbMapping m_req_rb_mapping;
     RespRbMapping m_resp_rb_mapping;

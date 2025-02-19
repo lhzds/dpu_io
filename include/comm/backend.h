@@ -42,7 +42,7 @@ public:
 private:
     void send_ctrl_msg(const ConstBytesView &raw_msg);
 
-    void connect_io_and_qp(size_t qp_id, ReqRbMapping::DpuRbView &req_view);
+    void connect_io_and_qp(int qp_id, ReqRbMapping::DpuRbView &req_view);
 
     std::unique_ptr<IoCtx> m_io_ctx;
     MsgQueue m_io_mq;

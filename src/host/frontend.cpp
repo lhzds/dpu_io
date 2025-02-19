@@ -1,4 +1,3 @@
-#include "constant.h"
 #include <doca_comch.h>
 #include <doca_ctx.h>
 #include <doca_pe.h>
@@ -11,7 +10,7 @@
 
 namespace pulsedb {
 Frontend::Frontend(const std::string_view &backend_name, const std::string_view &dev_pci,
-        size_t qp_num, size_t req_rb_cap, size_t resp_rb_cap) {
+        int qp_num, size_t req_rb_cap, size_t resp_rb_cap) {
     SPDLOG_INFO("frontend is starting...");
     docacxx::check_derr(docacxx::open_doca_device_with_pci(dev_pci.data(), &m_dev),
             "failed to open dev");
@@ -38,7 +37,7 @@ Frontend::Frontend(const std::string_view &backend_name, const std::string_view 
     recv_ctrl_msg<CtrlMsg::AckMsgRef>();
 
     m_qps.reserve(qp_num);
-    for (size_t i{}; i < qp_num; ++i) {
+    for (int i{}; i < qp_num; ++i) {
         m_qps.emplace_back(std::make_unique<FrontendQp>(*this, i, req_rb_cap, resp_rb_cap));
         auto &qp = *m_qps.back();
 
@@ -103,12 +102,12 @@ void Frontend::send_ctrl_msg(ConstBytesView raw_msg) {
     }
 }
 
-void Frontend::send_init_msg(size_t qp_num) {
+void Frontend::send_init_msg(int qp_num) {
     send_ctrl_msg(CtrlMsg::make_init_msg(qp_num));
     SPDLOG_INFO("send init msg[qp_num={}]", qp_num);
 }
 
-void Frontend::send_init_qp_msg(size_t qp_id,
+void Frontend::send_init_qp_msg(int qp_id,
     char *host_req_mem_addr, size_t host_req_mem_size,
     char *host_resp_mem_addr, size_t host_resp_mem_size,
     const ConstBytesView &req_export_desc, const ConstBytesView &resp_export_desc) {

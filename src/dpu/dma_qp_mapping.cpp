@@ -63,7 +63,7 @@ RbMapping::make_memcpy_segs(RingBufferRep::Slice src, RingBufferRep::Slice dst) 
     return ret;
 }
 
-DmaQpMapping::DmaQpMapping(Backend &backend, size_t id,
+DmaQpMapping::DmaQpMapping(Backend &backend, int id,
     size_t dpu_req_rb_cap, ConstBytesView host_req_mmap_desc, 
     char *host_req_mem_addr, size_t host_req_mem_size,
     size_t dpu_resp_rb_cap, ConstBytesView host_resp_mmap_desc,

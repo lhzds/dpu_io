@@ -8,31 +8,47 @@
 #include <sys/stat.h>
 
 namespace pulsedb {
-SstPool::SstPool(std::string sst_dir, size_t base_pool_size,
-                 size_t big_pool_cnt, size_t big_pool_size,
+SstPool::SstPool(std::string sst_dir, int base_pool_size,
+                 int big_pool_cnt, int big_pool_size,
                  size_t file_size_base, size_t sst_pad_len)
     : m_sst_dir(std::move(sst_dir)), m_base_pool_size(base_pool_size),
       m_big_pool_cnt(big_pool_cnt), m_big_pool_size(big_pool_size),
       m_file_size_base(file_size_base), m_sst_pad_len(sst_pad_len) {
   m_slots.resize(slot_cnt());
-  m_used_cnts.resize(pool_cnt());
+  m_used_slot_cnts.resize(pool_cnt());
   m_avail_slots.resize(pool_cnt());
 
-  for (size_t pool_id{}; pool_id < pool_cnt(); ++pool_id) {
+  for (int pool_id{}; pool_id < pool_cnt(); ++pool_id) {
     auto [start, end] = slot_id_range_of(pool_id);
 
-    for (size_t slot_id{start}; slot_id < end; ++slot_id) {
+    for (int slot_id{start}; slot_id < end; ++slot_id) {
       m_avail_slots[pool_id].push_back(slot_id);
     }
   }
 }
 
-void SstPool::create_same_size_ssts(const std::string &sst_dir, size_t file_cnt,
-                                    size_t file_size, size_t start_id) {
+void SstPool::create_ssts() {
+  umask(0);
+  // 创建 base pool 的文件
+  create_same_size_ssts(m_base_pool_size, m_file_size_base + m_sst_pad_len, 0);
+
+  // 创建 big pool 的文件
+  int start_id = m_base_pool_size;
+  size_t file_size = 2 * m_file_size_base + m_sst_pad_len;
+  for (int i{}; i < m_big_pool_cnt; ++i) {
+    create_same_size_ssts(m_big_pool_size, file_size, start_id);
+
+    start_id += m_big_pool_size;
+    file_size += m_file_size_base;
+  }
+}
+
+void SstPool::create_same_size_ssts(int file_cnt, size_t file_size,
+                                    int start_slot_id) {
   BytesBuffer buf;
 
-  for (size_t i{}; i < file_cnt; ++i) {
-    auto sst_name = sst_dir + "/" + std::to_string(start_id + i);
+  for (int i{}; i < file_cnt; ++i) {
+    auto sst_name = slot_file_name(start_slot_id + i);
     if (std::filesystem::exists(sst_name)) {
       continue;
     }
@@ -63,26 +79,8 @@ void SstPool::create_same_size_ssts(const std::string &sst_dir, size_t file_cnt,
   }
 }
 
-void SstPool::create_ssts(const std::string &sst_dir,
-    size_t base_pool_size, size_t big_pool_cnt, size_t big_pool_size,
-    size_t file_size_base, size_t sst_pad_len) {
-  umask(0);
-  // 创建 base pool 的文件
-  create_same_size_ssts(sst_dir, base_pool_size, file_size_base + sst_pad_len, 0);
-
-  // 创建 big pool 的文件
-  size_t start_id = base_pool_size;
-  size_t file_size = 2 * file_size_base + sst_pad_len;
-  for (size_t i{}; i < big_pool_cnt; ++i) {
-    create_same_size_ssts(sst_dir, big_pool_size, file_size, start_id);
-
-    start_id += big_pool_size;
-    file_size += file_size_base;
-  }
-}
-
-std::optional<size_t> SstPool::alloc_slot(size_t file_number,
-                                          size_t base_size_multiplier) {
+std::optional<int> SstPool::alloc_slot(size_t file_number,
+                                       int base_size_multiplier) {
   assert(base_size_multiplier >= 1);
   size_t pool_id = base_size_multiplier - 1;
   assert(pool_id < pool_cnt());
@@ -92,7 +90,7 @@ std::optional<size_t> SstPool::alloc_slot(size_t file_number,
   auto slot_id = m_avail_slots[pool_id].front();
   m_avail_slots[pool_id].pop_front();
 
-  ++m_used_cnts[pool_id];
+  ++m_used_slot_cnts[pool_id];
   assert(m_slots[slot_id] == 0);
   m_slots[slot_id] = file_number;
   m_file_slot[file_number] = slot_id;
@@ -107,24 +105,26 @@ void SstPool::free_slot(size_t file_number) {
   m_file_slot.erase(iter);
 
   m_slots[slot_id] = 0;
-  size_t pool_id = pool_id_of(slot_id);
-  --m_used_cnts[pool_id];
+  auto pool_id = pool_id_of(slot_id);
+  --m_used_slot_cnts[pool_id];
   m_avail_slots[pool_id].push_back(slot_id);
 }
 
-std::pair<size_t, size_t> SstPool::slot_id_range_of(size_t pool_id) const {
+std::pair<int, int> SstPool::slot_id_range_of(int pool_id) const {
   assert(pool_id < pool_cnt());
 
   if (pool_id == 0) {
     return {0, m_base_pool_size};
   }
-  size_t big_pool_id = pool_id - 1;
+  int big_pool_id = pool_id - 1;
   auto start = m_base_pool_size + big_pool_id * m_big_pool_size;
   auto end = m_base_pool_size + (big_pool_id + 1) * m_big_pool_size;
   return {start, end};
 }
 
-size_t SstPool::pool_id_of(size_t slot_id) const {
+int SstPool::pool_id_of(int slot_id) const {
+  assert(slot_id < slot_cnt());
+
   if (slot_id < m_base_pool_size) {
     return 0;
   }

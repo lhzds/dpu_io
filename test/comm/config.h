@@ -18,6 +18,6 @@ constexpr size_t kDpuRespRbCap{kHostRespRbCap};
 
 const std::string kHostSstPoolDir{"/home/olh/mnt/local/nvme3n1"};
 const std::string kDpuSstPoolDir{"/home/olh/mnt/57-nvme3n1"};
-constexpr size_t kBasePoolSize{1};
-constexpr size_t kFileSizeBase{1 * MB};
+constexpr size_t kBasePoolSize{10};
+constexpr size_t kFileSizeBase{64 * MB};
 constexpr size_t kUringQueueDepth{512};

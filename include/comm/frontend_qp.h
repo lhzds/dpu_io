@@ -19,19 +19,19 @@ class FrontendQp: Noncopyable {
 public:
     std::atomic_bool is_busy{};
 
-    FrontendQp(Frontend &frontend, size_t id, size_t req_rb_cap, size_t resp_rb_cap);
+    FrontendQp(Frontend &frontend, int id, size_t req_rb_cap, size_t resp_rb_cap);
     ~FrontendQp();
 
     void create_producer(Frontend &frontend);
     void create_consumer(Frontend &frontend);
 
-    void prep_write(size_t file_number, size_t offset, size_t base_size_multiplier = 1);
+    void prep_write(size_t file_number, size_t offset, int base_size_multiplier = 1);
     void append(const ConstBytesView &content);
     void post_write();
 
     void post_sync_close(size_t file_number, bool use_fsync);
 
-    void wait_all();
+    std::vector<int> wait_all();
 
     RingBuffer &req_rb_ref() { return m_req_rb; }
     docacxx::Mmap &req_mmap_ref() { return *m_req_mmap; }
@@ -50,9 +50,9 @@ private:
     void wait_new_resps(size_t wait_size, size_t processed_size);
 
     doca_pe *m_pe{};
-    size_t m_id{};
+    int m_id{-1};
 
-    size_t m_submitted_req_cnt{}; // 当前仍未完成的请求数
+    int m_submitted_req_cnt{}; // 当前仍未完成的请求数
     bool m_is_prep_write{};
     std::optional<RingBuffer::View> m_reserved_header_space;
     IoReqMsg::WriteHeader m_cache_header;

@@ -46,7 +46,7 @@ struct IoReqMsg {
     };
 
     struct WriteHeader: CommonHeader {
-        size_t base_size_multiplier;
+        int base_size_multiplier;
         size_t offset;
         size_t size;
     };
@@ -107,7 +107,7 @@ struct IoReqMsg {
         return std::move(std::get<std::unique_ptr<ReqType>>(variant));
     }
 
-    static void init_write_req_header(WriteHeader &header, size_t file_number, size_t offset, size_t base_size_multiplier) {
+    static void init_write_req_header(WriteHeader &header, size_t file_number, size_t offset, int base_size_multiplier) {
         header.type = Type::kWrite;
         header.file_number = file_number;
         header.offset = offset;

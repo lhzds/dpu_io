@@ -11,7 +11,7 @@
 #include "util.h"
 
 namespace pulsedb {
-FrontendQp::FrontendQp(Frontend &frontend, size_t id,
+FrontendQp::FrontendQp(Frontend &frontend, int id,
     size_t req_rb_cap, size_t resp_rb_cap)
     : m_id(id), m_req_rb(req_rb_cap), m_resp_rb(resp_rb_cap) {
     docacxx::check_derr(doca_pe_create(&m_pe), "failed to create pe");
@@ -76,7 +76,7 @@ void FrontendQp::post_sync_close(size_t file_number, bool use_fsync) {
     send_req_rb_new_size(req.size());
 }
 
-void FrontendQp::prep_write(size_t file_number, size_t offset, size_t base_size_multiplier) {
+void FrontendQp::prep_write(size_t file_number, size_t offset, int base_size_multiplier) {
     if (m_is_prep_write) {
         throw_with("already prepared write");
     }
@@ -124,9 +124,11 @@ void FrontendQp::post_write() {
     send_req_rb_new_size(sizeof(m_cache_header) + m_cache_header.size);
 }
 
-void FrontendQp::wait_all() {
+std::vector<int> FrontendQp::wait_all() {
+    std::vector<int> slot_ids;
+
     size_t processed_size{};
-    size_t wait_req_cnt = m_submitted_req_cnt;
+    auto wait_req_cnt = m_submitted_req_cnt;
     while (wait_req_cnt > 0) {
         wait_new_resps(wait_req_cnt * sizeof(IoRespMsg), processed_size);
         processed_size = 0;
@@ -145,6 +147,7 @@ void FrontendQp::wait_all() {
                     if (resp.res < 0) {
                         throw_with("Sync close error with {}: {}", resp.file_number, strerror(-resp.res));
                     }
+                    slot_ids.emplace_back(resp.res);
                     break;
                 default:
                     throw_with("unsupported type");
@@ -155,6 +158,7 @@ void FrontendQp::wait_all() {
     }
 
     m_submitted_req_cnt = 0;
+    return slot_ids;
 }
 
 void FrontendQp::send_req_rb_new_size(size_t new_size) {

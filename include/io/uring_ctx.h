@@ -15,7 +15,7 @@
 namespace pulsedb {
 class UringCtx: public IoCtx {
 public:
-    UringCtx(size_t queue_depth, std::unique_ptr<SstPool> sst_pool)
+    UringCtx(uint32_t queue_depth, std::unique_ptr<SstPool> sst_pool)
         : m_uring(new io_uring), m_sst_pool(std::move(sst_pool)) {
         if (auto ret = io_uring_queue_init(queue_depth, m_uring, 0); ret < 0) {
             throw_with(fmt::format("Failed to create init uring queue: ", strerror(errno)));
@@ -34,7 +34,7 @@ public:
         delete m_uring;
     }
 
-    void write_async(size_t file_number, size_t offset, size_t base_size_multiplier,
+    void write_async(size_t file_number, size_t offset, int base_size_multiplier,
         const RingBuffer::View &src, CallbackFn *cb) override {
         FileCtx *ctx{};
         auto iter = m_writing_files.find(file_number);
@@ -70,7 +70,8 @@ private:
             bool use_fsync{};
             CallbackFn *cb{};
         };
-        size_t file_number{};
+        size_t file_number{}; // 从 1 开始
+        int slot_id{-1}; // 从 0 开始
         int os_fd{-1};
         std::atomic<int> write_cnt{};
         std::atomic<SyncCloseArg *> sync_close_req{};
@@ -83,12 +84,14 @@ private:
     };
 
 
-    FileCtx *init_write_ctx(size_t file_number, size_t base_size_multiplier) {
+    FileCtx *init_write_ctx(size_t file_number, int base_size_multiplier) {
         auto ctx = std::make_unique<FileCtx>();
         ctx->file_number = file_number;
 
         auto slot_id = m_sst_pool->alloc_slot(file_number, base_size_multiplier);
         assert(slot_id.has_value());
+        ctx->slot_id = *slot_id;
+
         auto sst_name = m_sst_pool->slot_file_name(*slot_id);
         ctx->os_fd = open(sst_name.c_str(), O_WRONLY);
         if (ctx->os_fd < 0) {
@@ -102,7 +105,7 @@ private:
 
     void try_issue_sync_close(FileCtx *ctx) {
         if (ctx->write_cnt == 0) {
-            auto &arg = *ctx->sync_close_req;
+            auto &arg = *(ctx->sync_close_req);
             auto *io_data = new IoData;
             io_data->op = Op::kSyncClose;
             io_data->ctx = ctx;
@@ -117,7 +120,6 @@ private:
             throw_with(fmt::format("Failed to get sqe: ", strerror(errno)));
         }
 
-        sqe->user_data = reinterpret_cast<uint64_t>(io_data);
         io_data->iovs[0].iov_base = src.first_part().data();
         io_data->iovs[0].iov_len = src.first_part().size();
         if (src.second_part().has_value()) {
@@ -127,6 +129,7 @@ private:
         } else {
             io_uring_prep_writev(sqe, fd, io_data->iovs, 1, offset);
         }
+        sqe->user_data = reinterpret_cast<uint64_t>(io_data);
         
         if (auto ret = io_uring_submit(m_uring); ret < 0) {
             throw_with(fmt::format("Failed to submit uring: ", strerror(errno)));
@@ -149,8 +152,8 @@ private:
         if (sqe2 == nullptr) {
             throw_with(fmt::format("Failed to get sqe2: ", strerror(errno)));
         }
-        sqe2->user_data = reinterpret_cast<uint64_t>(io_data);
         io_uring_prep_close(sqe2, fd);
+        sqe2->user_data = reinterpret_cast<uint64_t>(io_data);
 
         if (auto ret = io_uring_submit(m_uring); ret < 0) {
             throw_with(fmt::format("Failed to submit uring: ", strerror(errno)));
@@ -167,15 +170,11 @@ private:
                 throw_with("Io error: {}", strerror(-cqe->res));
             }
 
+            int res = cqe->res;
             std::unique_ptr<IoData> io_data;
             io_data.reset((IoData *)cqe->user_data);
             io_uring_cqe_seen(m_uring, cqe);
-
             if (not io_data) continue;
-
-            if (io_data->cb != nullptr) {
-                io_data->cb->operator()(cqe->res);
-            }
 
             auto &ctx = io_data->ctx;
             if (io_data->op == Op::kWrite) {
@@ -184,9 +183,14 @@ private:
                     try_issue_sync_close(ctx);
                 }
             } else if (io_data->op == Op::kSyncClose) {
+                res = ctx->slot_id;
                 m_writing_files.erase(ctx->file_number);
             } else {
                 throw_with("unexpected op type");
+            }
+
+            if (io_data->cb != nullptr) {
+                io_data->cb->operator()(res);
             }
 
         }

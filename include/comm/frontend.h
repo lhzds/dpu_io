@@ -1,6 +1,5 @@
 #pragma once
 
-#include <atomic>
 #include <memory>
 #include <optional>
 
@@ -16,11 +15,11 @@ class FrontendQp;
 class Frontend: Noncopyable {
 public:
     Frontend(const std::string_view &backend_name, const std::string_view &dev_pci,
-        size_t qp_num, size_t req_rb_cap, size_t resp_rb_cap);
+        int qp_num, size_t req_rb_cap, size_t resp_rb_cap);
     ~Frontend();
 
-    void send_init_msg(size_t qp_num);
-    void send_init_qp_msg(size_t qp_id,
+    void send_init_msg(int qp_num);
+    void send_init_qp_msg(int qp_id,
         char *host_req_mem_addr, size_t host_req_mem_size,
         char *host_resp_mem_addr, size_t host_resp_mem_size,
         const ConstBytesView &req_export_desc, const ConstBytesView &resp_export_desc);
@@ -45,7 +44,7 @@ private:
     doca_comch_connection *m_conn{};
     std::unique_ptr<docacxx::comch::Client> m_ctrl_client{};
     
-    size_t m_start_alloc_idx{};
+    int m_start_alloc_idx{};
     std::vector<std::unique_ptr<FrontendQp>> m_qps;
 
     // tmp var for callback

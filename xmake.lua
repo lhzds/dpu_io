@@ -16,6 +16,7 @@ add_includedirs("include")
 includes("deps/docacxx/xmake.lua")
 includes("src/host/xmake.lua")
 includes("src/dpu/xmake.lua")
+includes("src/sst_pool/xmake.lua")
 
 includes("exp/xmake.lua")
 includes("test/xmake.lua")

@@ -61,8 +61,9 @@ void read_args(int argc, char **argv) {
 int main(int argc, char *argv[]) {
     read_args(argc, argv);
 
-    pulsedb::SstPool::create_ssts(sst_pool_dir, base_pool_size,
+    pulsedb::SstPool sst_pool(sst_pool_dir, base_pool_size,
         big_pool_cnt, big_pool_size, file_size_base, sst_pad_len);
+    sst_pool.create_ssts();
 
     return 0;
 }

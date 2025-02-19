@@ -34,7 +34,7 @@ public:
             assert(not ret);
         });
         m_consumer->set_post_recv_error_cb([](auto task) {
-            SPDLOG_INFO("passive_consumer: post_recv task is canceled");
+            SPDLOG_INFO("[Passive-Consumer] Release post_recv task");
         });
         m_consumer->start_sync();
         // 初始提交所有 post_recv_task

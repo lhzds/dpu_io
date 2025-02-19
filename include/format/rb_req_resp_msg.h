@@ -19,7 +19,7 @@ struct IoRespMsg {
 
     Type type;
     size_t file_number;
-    int res;
+    int res; // SyncClose 成功后，res 记录 slot_id
 
     static BytesBuffer make(Type type, size_t file_number, int res) {
         BytesBuffer buf(sizeof(IoRespMsg));
@@ -124,7 +124,11 @@ struct IoReqMsg {
         return req;
     }
 
-    static RefVariant read(RingBuffer::View &src) {
+    static RefVariant parse_from(RingBuffer::View src) {
+        return read_from(src);
+    }
+
+    static RefVariant read_from(RingBuffer::View &src) {
         Type req_type = read_req_type(src);
 
         switch (req_type) {
@@ -138,24 +142,6 @@ struct IoReqMsg {
                 auto req = std::make_unique<SyncCloseMsgRbRef>();
                 ref_or_copy_req_header(src, *req);
                 return req;
-            }
-            default:
-                throw_with("unsupported type");
-        }
-    }
-
-    static RingBuffer::View read_view(RingBuffer::View &src) {
-        Type req_type = read_req_type(src);
-
-        switch (req_type) {
-            case Type::kWrite: {
-                auto copy = src;
-                WriteMsgRbRef req;
-                ref_or_copy_req_header(copy, req);
-                return src.cut(sizeof(WriteHeader) + req.header->size);
-            }
-            case Type::kSyncClose: {
-                return src.cut(sizeof(SyncCloseHeader));
             }
             default:
                 throw_with("unsupported type");

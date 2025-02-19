@@ -17,7 +17,7 @@ namespace pulsedb {
 Backend::Backend(const std::string_view &name, const std::string_view &dev_pci,
     const std::string_view &dev_rep_pci, std::unique_ptr<IoCtx> io_ctx,
     size_t dpu_req_rb_cap, size_t dpu_resp_rb_cap) {
-    SPDLOG_INFO("backend is starting...");
+    SPDLOG_INFO("[Backend] Starting...");
     m_io_ctx = std::move(io_ctx);
 
     docacxx::check_derr(docacxx::open_doca_device_with_pci(dev_pci.data(), &m_dev),
@@ -79,7 +79,7 @@ Backend::Backend(const std::string_view &name, const std::string_view &dev_pci,
         qp->create_consumer(*this);
         qp->create_producer(*this);
     }
-    SPDLOG_INFO("create {} qps", qp_num);
+    SPDLOG_INFO("[Backend] Create {} qps", qp_num);
 
     // 运行时只接受 exit 退出消息
     m_ctrl_server->set_recv_cb([&](doca_comch_connection *conn, uint8_t *data, uint32_t len) {
@@ -92,26 +92,26 @@ Backend::Backend(const std::string_view &name, const std::string_view &dev_pci,
         if (msg_type != CtrlMsg::Type::kExit) {
             throw_with("wrong msg type");
         }
-        SPDLOG_INFO("receive exit msg");
+        SPDLOG_INFO("[Backend] Receive exit msg");
         m_is_exited = true;
     });
     send_start_comm_msg();
 }
 
 Backend::~Backend() {
-    SPDLOG_INFO("backend start exiting");
+    SPDLOG_INFO("[Backend] Exiting...");
     m_qps.clear();
     m_dma->clean_sync();
     m_ctrl_server->clean_sync();
     
     if (auto result = doca_pe_destroy(m_pe); result != DOCA_SUCCESS) {
-        std::cerr << "failed to destroy pe: " << doca_error_get_descr(result) << std::endl;
+        std::cerr << "Failed to destroy pe: " << doca_error_get_descr(result) << std::endl;
     }
     if (auto result = doca_dev_rep_close(m_dev_rep); result != DOCA_SUCCESS) {
-        std::cerr << "failed to close dev rep: " << doca_error_get_descr(result) << std::endl;
+        std::cerr << "Failed to close dev rep: " << doca_error_get_descr(result) << std::endl;
     }
     if (auto result = doca_dev_close(m_dev); result != DOCA_SUCCESS) {
-        std::cerr << "failed to close dev: " << doca_error_get_descr(result) << std::endl;
+        std::cerr << "Failed to close dev: " << doca_error_get_descr(result) << std::endl;
     }
 }
 
@@ -134,15 +134,15 @@ CtrlMsgType Backend::recv_ctrl_msg() {
     auto ret = std::get<CtrlMsgType>(*m_ctrl_msg_variant);
     m_ctrl_msg_variant = std::nullopt;
     if constexpr (std::is_same_v<CtrlMsgType, CtrlMsg::AckMsgRef>) {
-        SPDLOG_INFO("receive ack msg");
+        SPDLOG_INFO("[Backend] Receive ack msg");
     } else if constexpr (std::is_same_v<CtrlMsgType, CtrlMsg::InitMsgRef>) {
-        SPDLOG_INFO("receive init msg");
+        SPDLOG_INFO("[Backend] Receive init msg");
     } else if constexpr (std::is_same_v<CtrlMsgType, CtrlMsg::InitQpMsgRef>) {
-        SPDLOG_INFO("receive init_qp msg");
+        SPDLOG_INFO("[Backend] Receive init_qp msg");
     } else if constexpr (std::is_same_v<CtrlMsgType, CtrlMsg::ExitMsgRef>) {
-        SPDLOG_INFO("receive exit msg");
+        SPDLOG_INFO("[Backend] Receive exit msg");
     } else if constexpr (std::is_same_v<CtrlMsgType, CtrlMsg::StartCommMsgRef>) {
-        SPDLOG_INFO("receive start_comm msg");
+        SPDLOG_INFO("[Backend] Receive start_comm msg");
     }
     return ret;
 }
@@ -162,12 +162,12 @@ void Backend::send_ctrl_msg(const ConstBytesView &raw_msg) {
 
 void Backend::send_ack_msg() {
     send_ctrl_msg(CtrlMsg::make_ack_msg());
-    SPDLOG_INFO("send ack msg");
+    SPDLOG_INFO("[Backend] Send ack msg");
 }
 
 void Backend::send_start_comm_msg() {
     send_ctrl_msg(CtrlMsg::make_start_comm_msg());
-    SPDLOG_INFO("send start_comm msg");
+    SPDLOG_INFO("[Backend] Send start_comm msg");
 }
 
 size_t Backend::recv_new_conumser_id() {
@@ -176,12 +176,12 @@ size_t Backend::recv_new_conumser_id() {
     }
     auto ret = *m_new_consumer_id;
     m_new_consumer_id = std::nullopt;
-    SPDLOG_INFO("receive new consumer id={}", *m_new_consumer_id);
+    SPDLOG_INFO("[Backend] Receive new_consumer_id={}", *m_new_consumer_id);
     return ret;
 }
 
 void Backend::connect_io_and_qp(int qp_id, ReqRbMapping::DpuRbView &req_view) {
-    auto ref_var = IoReqMsg::read(req_view.inner);
+    auto ref_var = IoReqMsg::parse_from(req_view.inner);
     IoReqMsg::Type type;
     std::visit([&](const auto &r) {
         type = r->header->type;
@@ -191,11 +191,13 @@ void Backend::connect_io_and_qp(int qp_id, ReqRbMapping::DpuRbView &req_view) {
         case IoReqMsg::Type::kWrite: {
             auto write_ref = IoReqMsg::get_req_ptr<IoReqMsg::WriteMsgRbRef>(ref_var);
             auto &header = *write_ref->header;
-            SPDLOG_INFO("start processing write req[file_number={}, offset={}, size={}] from qp_id={}",
-                header.file_number, header.offset, header.size, qp_id);
+            SPDLOG_INFO("[Backend] Submit request from qp_id={} to I/O engine"
+                "[Write: file_number={}, offset={}, size={}]",
+                qp_id, header.file_number, header.offset, header.size);
             auto *cb = IoCtx::CallbackFn::make([&, qp_id, file_number = header.file_number](int res) {
-                SPDLOG_INFO("finish processing write req[file_number={}] from qp_id={}",
-                    file_number, qp_id);
+                SPDLOG_INFO("[Backend] Complete request from qp_id={}"
+                    "[Write: file_number={}]",
+                    qp_id, file_number);
                 auto msg = IoRespMsg::make(IoRespMsg::Type::kWrite, file_number, res);
                 m_qps[qp_id]->finish_req(req_view, std::move(msg));
             });
@@ -206,11 +208,11 @@ void Backend::connect_io_and_qp(int qp_id, ReqRbMapping::DpuRbView &req_view) {
         case IoReqMsg::Type::kSyncClose: {
             auto sync_close_ref = IoReqMsg::get_req_ptr<IoReqMsg::SyncCloseMsgRbRef>(ref_var);
             auto &header = *sync_close_ref->header;
-            SPDLOG_INFO("Start processing sync close req[file_number={}] from qp_id={}",
-                header.file_number, qp_id);
+            SPDLOG_INFO("[Backend] Submit request from qp_id={} to I/O engine[SyncClose: file_number={}]",
+                qp_id, header.file_number);
             auto *cb = IoCtx::CallbackFn::make([&, qp_id, file_number = header.file_number](int res) {
-                SPDLOG_INFO("finish processing sync close req[file_number={}] from qp_id={}",
-                    file_number, qp_id);
+                SPDLOG_INFO("[Backend] Complete request from qp_id={}[SyncClose: file_number={}]",
+                    qp_id, file_number);
                 auto msg = IoRespMsg::make(IoRespMsg::Type::kSyncClose, file_number, res);
                 m_qps[qp_id]->finish_req(req_view, std::move(msg));
             });

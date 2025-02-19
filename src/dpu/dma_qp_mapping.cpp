@@ -8,6 +8,7 @@
 #include "constant.h"
 #include "doca_wrapper/passive_consumer.h"
 #include "doca_wrapper/queue_dma.h"
+#include "format/rb_req_resp_msg.h"
 #include "ring_buffer.h"
 #include "types.h"
 #include "util.h"
@@ -74,9 +75,9 @@ DmaQpMapping::DmaQpMapping(Backend &backend, int id,
         host_req_mem_addr, host_req_mem_size, backend.dma()),
     m_resp_rb_mapping(id, backend.dev(), dpu_resp_rb_cap, host_resp_mmap_desc,
         host_resp_mem_addr, host_resp_mem_size, backend.dma()) {
-    SPDLOG_INFO("create a dma_qp_mapping with id={}"
-        "[dpu_req_rb_cap={}, host_req_rb_cap={}, "
-        "dpu_resp_rb_cap={}, host_resp_rb_cap={}", m_id,
+    SPDLOG_INFO("[Backend] Create dma_qp_mapping"
+        "[id={}, dpu_req_rb_cap={}, host_req_rb_cap={}, "
+        "dpu_resp_rb_cap={}, host_resp_rb_cap={}]", m_id,
         dpu_req_rb_cap, host_req_mem_size,
         dpu_resp_rb_cap, host_resp_mem_size);
     m_req_rb_mapping.set_dma_done_cb(std::move(req_dma_done_cb));

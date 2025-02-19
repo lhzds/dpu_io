@@ -6,7 +6,7 @@
 #include <variant>
 
 #include "bytes.h"
-#include "io/io_ctx.h"
+#include "io/io_engine.h"
 #include "noncopyable.h"
 #include "ring_buffer.h"
 #include "util.h"
@@ -15,7 +15,7 @@ namespace pulsedb {
 
 // 消息空间小，直接进行拷贝
 struct IoRespMsg {
-    using Type = IoCtx::Op;
+    using Type = IoEngine::Op;
 
     Type type;
     size_t file_number;
@@ -38,7 +38,7 @@ struct IoRespMsg {
 // 数据路径消息，基于环形队列做中转异步传输
 // 读消息时优先原地读
 struct IoReqMsg {
-    using Type = IoCtx::Op;
+    using Type = IoEngine::Op;
 
     struct CommonHeader {
         Type type;

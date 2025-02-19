@@ -5,7 +5,7 @@
 #include "docacxx/ctx/server.h"
 #include "format/ctrl_msg.h"
 #include "format/rb_req_resp_msg.h"
-#include "io/io_ctx.h"
+#include "io/io_engine.h"
 
 #include <doca_dev.h>
 #include <doca_pe.h>
@@ -15,7 +15,7 @@
 namespace pulsedb {
     
 Backend::Backend(const std::string_view &name, const std::string_view &dev_pci,
-    const std::string_view &dev_rep_pci, std::unique_ptr<IoCtx> io_ctx,
+    const std::string_view &dev_rep_pci, std::unique_ptr<IoEngine> io_ctx,
     size_t dpu_req_rb_cap, size_t dpu_resp_rb_cap) {
     SPDLOG_INFO("[Backend] Starting...");
     m_io_ctx = std::move(io_ctx);
@@ -72,7 +72,7 @@ Backend::Backend(const std::string_view &name, const std::string_view &dev_pci,
             ConstBytesView(init_qp_msg.host_resp_mmap_desc, header->host_resp_mmap_desc_size),
             header->host_resp_mem_addr, header->host_resp_mem_size,
 
-            [&](int qp_id, ReqRbMapping::DpuRbView &req_view) { connect_io_and_qp(qp_id, req_view); }
+            [&](int qp_id, ReqRbMapping::DpuRbView &req_view) { submit_request_to_io_engine(qp_id, req_view); }
         ));
 
         auto &qp = m_qps.back();
@@ -116,12 +116,9 @@ Backend::~Backend() {
 }
 
 void Backend::run() {
-    std::function<void()> msg;
     while (not m_is_exited) {
         doca_pe_progress(m_pe);
-        while (m_io_mq.pop(msg)) {
-            msg();
-        }
+        m_io_ctx->query();
     }
 }
 
@@ -180,7 +177,7 @@ size_t Backend::recv_new_conumser_id() {
     return ret;
 }
 
-void Backend::connect_io_and_qp(int qp_id, ReqRbMapping::DpuRbView &req_view) {
+void Backend::submit_request_to_io_engine(int qp_id, ReqRbMapping::DpuRbView &req_view) {
     auto ref_var = IoReqMsg::parse_from(req_view.inner);
     IoReqMsg::Type type;
     std::visit([&](const auto &r) {
@@ -194,7 +191,7 @@ void Backend::connect_io_and_qp(int qp_id, ReqRbMapping::DpuRbView &req_view) {
             SPDLOG_INFO("[Backend] Submit request from qp_id={} to I/O engine"
                 "[Write: file_number={}, offset={}, size={}]",
                 qp_id, header.file_number, header.offset, header.size);
-            auto *cb = IoCtx::CallbackFn::make([&, qp_id, file_number = header.file_number](int res) {
+            auto *cb = IoEngine::CallbackFn::make([&, qp_id](size_t file_number, int res) {
                 SPDLOG_INFO("[Backend] Complete request from qp_id={}"
                     "[Write: file_number={}]",
                     qp_id, file_number);
@@ -210,7 +207,7 @@ void Backend::connect_io_and_qp(int qp_id, ReqRbMapping::DpuRbView &req_view) {
             auto &header = *sync_close_ref->header;
             SPDLOG_INFO("[Backend] Submit request from qp_id={} to I/O engine[SyncClose: file_number={}]",
                 qp_id, header.file_number);
-            auto *cb = IoCtx::CallbackFn::make([&, qp_id, file_number = header.file_number](int res) {
+            auto *cb = IoEngine::CallbackFn::make([&, qp_id](size_t file_number, int res) {
                 SPDLOG_INFO("[Backend] Complete request from qp_id={}[SyncClose: file_number={}]",
                     qp_id, file_number);
                 auto msg = IoRespMsg::make(IoRespMsg::Type::kSyncClose, file_number, res);

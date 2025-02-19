@@ -11,12 +11,14 @@
 #include <unistd.h>
 
 #include "io/sst_pool.h"
-#include "io_ctx.h"
+#include "io_engine.h"
 
 namespace pulsedb {
-class UringCtx: public IoCtx {
+
+// public 为前台线程接口
+class UringEngine: public IoEngine {
 public:
-    UringCtx(uint32_t queue_depth, std::unique_ptr<SstPool> sst_pool)
+    UringEngine(uint32_t queue_depth, std::unique_ptr<SstPool> sst_pool)
         : m_uring(new io_uring), m_sst_pool(std::move(sst_pool)) {
         if (auto ret = io_uring_queue_init(queue_depth, m_uring, 0); ret < 0) {
             throw_with(fmt::format("Failed to create init uring queue: ", strerror(errno)));
@@ -26,7 +28,7 @@ public:
             poll();
         });
     }
-    virtual ~UringCtx() {
+    virtual ~UringEngine() {
         m_is_killed = true;
         if (m_poller.joinable()) {
             m_poller.join();
@@ -48,7 +50,6 @@ public:
         }
 
         ++ctx->write_cnt;
-
         auto *io_data = new IoData;
         io_data->op = Op::kWrite;
         io_data->ctx = ctx;
@@ -60,11 +61,36 @@ public:
         auto iter = m_writing_files.find(file_number);
         assert(iter != m_writing_files.end()); // write 必然已被提交
         FileCtx *ctx = iter->second.get();
-        
-        // 先产生 sync_close_req，再查询 write_cnt, 避免执行丢失
-        // 保证前台线程和后台线程至少有一个线程发现 write_cnt == 0 时，提交 sync_close_req
-        ctx->sync_close_req = new FileCtx::SyncCloseArg{use_fsync, cb};
+
+        ctx->sync_close_req.reset(new FileCtx::SyncCloseArg{use_fsync, cb});
         try_issue_sync_close(ctx);
+    }
+
+
+    bool query() override {
+        IoData *io_data{};
+        if (not m_cq.pop(io_data)) {
+            return false;
+        }
+
+        auto &ctx = io_data->ctx;
+        int file_number = ctx->file_number;
+        if (io_data->op == Op::kWrite) {
+            --ctx->write_cnt;
+            try_issue_sync_close(ctx);
+        } else if (io_data->op == Op::kSyncClose) {
+            io_data->res = ctx->slot_id;
+            m_writing_files.erase(file_number);
+        } else {
+            throw_with("unexpected op type");
+        }
+
+        if (io_data->cb != nullptr) {
+            io_data->cb->operator()(file_number, io_data->res);
+        }
+
+        delete io_data;
+        return true;
     }
 
 private:    
@@ -76,16 +102,18 @@ private:
         size_t file_number{}; // 从 1 开始
         int slot_id{-1}; // 从 0 开始
         int os_fd{-1};
-        std::atomic<int> write_cnt{};
-        std::atomic<SyncCloseArg *> sync_close_req{};
+        int write_cnt{};
+        std::unique_ptr<SyncCloseArg> sync_close_req{};
     };
     struct IoData {
         Op op;
+        int res{};
         FileCtx *ctx{};
         CallbackFn *cb{};
         iovec iovs[2]{};
     };
-
+    using CompleteQueue = boost::lockfree::spsc_queue<IoData *,
+        boost::lockfree::capacity<kIoEngineCqDepth>>;
 
     FileCtx *init_write_ctx(size_t file_number, int base_size_multiplier) {
         auto ctx = std::make_unique<FileCtx>();
@@ -107,20 +135,15 @@ private:
     }
 
     void try_issue_sync_close(FileCtx *ctx) {
-        if (ctx->write_cnt == 0) {
-            FileCtx::SyncCloseArg *arg = nullptr;
-            // 避免两个线程同时发现 write_cnt == 0，提交两次 SyncClose
-            if (ctx->sync_close_req.compare_exchange_strong(arg, nullptr)) {
-                return;
-            }
+        if (ctx->write_cnt == 0 && ctx->sync_close_req != nullptr) {
             SPDLOG_INFO("[Io-Engine] Issue request[SyncClose: file_number={}]",
                 ctx->file_number);
-            // auto &arg = *(ctx->sync_close_req);
+            auto &arg = *(ctx->sync_close_req);
             auto *io_data = new IoData;
             io_data->op = Op::kSyncClose;
             io_data->ctx = ctx;
-            io_data->cb = arg->cb;
-            issue_sync_close(ctx->os_fd, arg->use_fsync, io_data);
+            io_data->cb = arg.cb;
+            issue_sync_close(ctx->os_fd, arg.use_fsync, io_data);
         }
     }
 
@@ -175,6 +198,7 @@ private:
     void poll() {
         io_uring_cqe *cqe{};
         int req_cnt{};
+
         while (((req_cnt = m_uring_cqe_cnt.load()) > 0) // 先获取最新的 req_cnt
             || not m_is_killed) {
             if (req_cnt == 0) {
@@ -188,32 +212,19 @@ private:
                 throw_with("Io error: {}", strerror(-cqe->res));
             }
             int res = cqe->res;
-            std::unique_ptr<IoData> io_data;
-            io_data.reset((IoData *)cqe->user_data);
+            auto *io_data = (IoData *)cqe->user_data;
             io_uring_cqe_seen(m_uring, cqe);
-
-            if (io_data) {
-                auto &ctx = io_data->ctx;
-                if (io_data->op == Op::kWrite) {
-                    --ctx->write_cnt;
-                    if (ctx->write_cnt == 0) {
-                        try_issue_sync_close(ctx);
-                    }
-                } else if (io_data->op == Op::kSyncClose) {
-                    res = ctx->slot_id;
-                    m_writing_files.erase(ctx->file_number);
-                } else {
-                    throw_with("unexpected op type");
-                }
-
-                if (io_data->cb != nullptr) {
-                    io_data->cb->operator()(res);
-                }
-            }
-
             m_uring_cqe_cnt.fetch_add(-1);
+
+            if (io_data == nullptr) continue;
+            io_data->res = res;
+            while (not m_cq.push(io_data)) {
+                std::this_thread::yield();
+            }
         }
     }
+
+    CompleteQueue m_cq;
 
     std::thread m_poller;
     std::atomic<bool> m_is_killed{};

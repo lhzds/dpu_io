@@ -8,7 +8,7 @@
 #include "comm/dma_qp_mapping.h"
 #include "doca_wrapper/queue_dma.h"
 #include "format/ctrl_msg.h"
-#include "io/io_ctx.h"
+#include "io/io_engine.h"
 #include "noncopyable.h"
 #include "types.h"
 
@@ -21,7 +21,7 @@ namespace pulsedb {
 class Backend: Noncopyable {
 public:
     Backend(const std::string_view &name, const std::string_view &dev_pci,
-        const std::string_view &dev_rep_pci, std::unique_ptr<IoCtx> io_ctx,
+        const std::string_view &dev_rep_pci, std::unique_ptr<IoEngine> io_ctx,
         size_t dpu_req_rb_cap, size_t dpu_resp_rb_cap);
     ~Backend();
 
@@ -42,10 +42,9 @@ public:
 private:
     void send_ctrl_msg(const ConstBytesView &raw_msg);
 
-    void connect_io_and_qp(int qp_id, ReqRbMapping::DpuRbView &req_view);
+    void submit_request_to_io_engine(int qp_id, ReqRbMapping::DpuRbView &req_view);
 
-    std::unique_ptr<IoCtx> m_io_ctx;
-    MsgQueue m_io_mq;
+    std::unique_ptr<IoEngine> m_io_ctx;
 
     bool m_is_exited{};
     doca_dev *m_dev{};

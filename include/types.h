@@ -33,9 +33,6 @@ private:
     std::queue<Event> m_queue;
 };
 
-using MsgQueue = boost::lockfree::spsc_queue<std::function<void()>,
-        boost::lockfree::capacity<kMsgQueueSize>>;
-
 // 区间类型
 struct Interval {
     size_t offset;

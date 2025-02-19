@@ -69,7 +69,7 @@ public:
     }
 
     void read_async(size_t size) {
-        SPDLOG_INFO("[Request-Rb] Receive meta msg[new_size={}]", size);
+        SPDLOG_INFO("[Request-Rb#{}] Receive meta msg[new_size={}]", m_id, size);
         auto hs = *m_host_rb_rep.write(size);
         // 用于判断 dpu_req_rb 是否有空间，否则放入等待队列
         auto cond = [&, expected_size = size]() -> bool { 
@@ -78,8 +78,8 @@ public:
         // 用于将 req 插入 req 环形队列
         auto action = [&, hs] {
             auto ds = *m_dpu_rb.rep().write(hs.size()); // 申请空间
-            SPDLOG_INFO("[Request-Rb] Start dmaing[Host->Dpu: dest_offset={}, dma_size={}]",
-                ds.first_part().offset, ds.size());
+            SPDLOG_INFO("[Request-Rb#{}] Start dmaing[Host->Dpu: dest_offset={}, dma_size={}]",
+                m_id, ds.first_part().offset, ds.size());
 
             m_dpu_rb_views.emplace_back(DpuRbViewStatus::kDmaInProgress, m_dpu_rb.view(ds)); // 记录元数据
             auto &dpu_rb_view = m_dpu_rb_views.back();
@@ -87,8 +87,8 @@ public:
                 make_memcpy_segs(hs, ds),
                 [&] {
                     auto ds = m_dpu_rb.slice(dpu_rb_view.inner);
-                    SPDLOG_INFO("[Request-Rb] Finish dmaing[Host->Dpu: dest_offset={}, dma_size={}]",
-                        ds.first_part().offset, ds.size());
+                    SPDLOG_INFO("[Request-Rb#{}] Finish dmaing[Host->Dpu: dest_offset={}, dma_size={}]",
+                        m_id, ds.first_part().offset, ds.size());
 
                     dpu_rb_view.status = DpuRbViewStatus::kProcessing;
                     for (const auto &v : m_dpu_rb_views) {
@@ -108,15 +108,15 @@ public:
     }
 
     void receive_needed_size(size_t size) {
-        SPDLOG_INFO("[Request-Rb] Receive meta msg[needed_space={}]", size);
+        SPDLOG_INFO("[Request-Rb#{}] Receive meta msg[needed_space={}]", m_id, size);
         m_host_needed_size = size;
         try_send_cleaned_size();
     }
 
     void invalid_dpu_view(DpuRbView &dpu_rb_view) {
         auto dpu_rb_slice = m_dpu_rb.slice(dpu_rb_view.inner);
-        SPDLOG_INFO("[Request-Rb] Invalid dpu rb slice[offset={}, size={}]",
-            dpu_rb_slice.first_part().offset, dpu_rb_slice.size());
+        SPDLOG_INFO("[Request-Rb#{}] Invalid dpu rb slice[offset={}, size={}]",
+            m_id, dpu_rb_slice.first_part().offset, dpu_rb_slice.size());
         
         dpu_rb_view.status = DpuRbViewStatus::kInvalided;
         for (auto iter = m_dpu_rb_views.begin(); iter != m_dpu_rb_views.end();
@@ -140,7 +140,7 @@ private:
             d2h_rb_meta_msg->payload.req_rb_cleaned_size = m_host_size_cleaned;
             auto ret = m_producer->try_submit_send_task(sizeof(*d2h_rb_meta_msg));
             assert(ret);
-            SPDLOG_INFO("[Request-Rb] Send meta msg[cleaned_size={}]", m_host_size_cleaned);
+            SPDLOG_INFO("[Request-Rb#{}] Send meta msg[cleaned_size={}]", m_id, m_host_size_cleaned);
             
             m_host_rb_rep.read(m_host_size_cleaned);
             m_host_size_cleaned = 0;
@@ -172,8 +172,8 @@ public:
             host_mem_addr, host_mem_size, dma), m_dmaing_host_rb_rep(host_mem_size) {}
 
     void append(BytesBuffer data) {
-        SPDLOG_INFO("[Response-Rb] Try to append data[size={}] to dpu rb[free_space={}]",
-            data.size(), m_dpu_rb.free_size());
+        SPDLOG_INFO("[Response-Rb#{}] Try to append data[size={}] to dpu rb[free_space={}]",
+            m_id, data.size(), m_dpu_rb.free_size());
         auto cond = [&, expected_size=data.size()] {
             return m_dpu_rb.free_size() >= expected_size;
         };
@@ -188,8 +188,8 @@ public:
     }    
 
     void receive_wait_stat(size_t processed_size, size_t wait_size) {
-        SPDLOG_INFO("[Response-Rb] Receive meta msg[processed={}, wait_size={}]",
-            processed_size, wait_size);
+        SPDLOG_INFO("[Response-Rb#{}] Receive meta msg[processed={}, wait_size={}]",
+            m_id, processed_size, wait_size);
         m_host_rb_rep.read(processed_size);
         m_dmaing_host_rb_rep.read(processed_size);
         // 执行 host 队列空间等待任务
@@ -201,23 +201,23 @@ public:
 
 private:
     void start_dma(DpuRbView &dpu_rb_view) {
-        SPDLOG_INFO("[Response-Rb] Try to start dmaing[Dpu->Host: size={}]",
-            dpu_rb_view.inner.size());
+        SPDLOG_INFO("[Response-Rb#{}] Try to start dmaing[Dpu->Host: size={}]",
+            m_id, dpu_rb_view.inner.size());
         auto cond = [&, expected_size = dpu_rb_view.inner.size()]() -> bool {
             return m_dmaing_host_rb_rep.free_size() >= expected_size;
         };
         auto action = [&] {
             auto ds = m_dpu_rb.slice(dpu_rb_view.inner);
-            SPDLOG_INFO("[Response-Rb] Start dmaing[Dpu->Host: dest_offset={}, dma_size={}]",
-                ds.first_part().offset, ds.size());
+            SPDLOG_INFO("[Response-Rb#{}] Start dmaing[Dpu->Host: dest_offset={}, dma_size={}]",
+                m_id, ds.first_part().offset, ds.size());
             auto hs = *m_dmaing_host_rb_rep.write(dpu_rb_view.inner.size());
             // TODO: 添加 DMA size 的最小阈值
             dpu_rb_view.status = DpuRbViewStatus::kDmaInProgress;
             m_dma->post_memcpyv(*m_dpu_mmap, *m_host_mmap,
                 make_memcpy_segs(ds, hs), 
                 [&, offset=ds.first_part().offset] {
-                    SPDLOG_INFO("[Response-Rb] Finish dmaing[Dpu->Host: dest_offset={}, dma_size={}]",
-                        offset, dpu_rb_view.inner.size());
+                    SPDLOG_INFO("[Response-Rb#{}] Finish dmaing[Dpu->Host: dest_offset={}, dma_size={}]",
+                        m_id, offset, dpu_rb_view.inner.size());
                     dpu_rb_view.status = DpuRbViewStatus::kDmaDone;
                     for (auto iter = m_dpu_rb_views.begin(); iter != m_dpu_rb_views.end();
                         iter = m_dpu_rb_views.erase(iter)) {
@@ -246,7 +246,7 @@ private:
             d2h_rb_meta_msg->payload.resp_rb_new_size = target;
             auto ret = m_producer->try_submit_send_task(sizeof(*d2h_rb_meta_msg));
             assert(ret);
-            SPDLOG_INFO("[Response-Rb] Send meta msg[dma_done_size={}]", target);
+            SPDLOG_INFO("[Response-Rb#{}] Send meta msg[dma_done_size={}]", m_id, target);
 
             m_host_rb_rep.write(target);
             m_dma_done_size -= target;

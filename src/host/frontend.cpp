@@ -11,7 +11,7 @@
 namespace pulsedb {
 Frontend::Frontend(const std::string_view &backend_name, const std::string_view &dev_pci,
         int qp_num, size_t req_rb_cap, size_t resp_rb_cap) {
-    SPDLOG_INFO("frontend is starting...");
+    SPDLOG_INFO("[Frontend] Starting...");
     docacxx::check_derr(docacxx::open_doca_device_with_pci(dev_pci.data(), &m_dev),
             "failed to open dev");
     docacxx::check_derr(doca_pe_create(&m_pe), "failed to create pe");
@@ -49,12 +49,12 @@ Frontend::Frontend(const std::string_view &backend_name, const std::string_view 
         qp.create_producer(*this);
         qp.create_consumer(*this);
     }
-    SPDLOG_INFO("create {} qps", qp_num);
+    SPDLOG_INFO("[Frontend] Create {} qps", qp_num);
     recv_ctrl_msg<CtrlMsg::StartCommMsgRef>();
 }
 
 Frontend::~Frontend() {
-    SPDLOG_INFO("frontend start exiting");
+    SPDLOG_INFO("[Frontend] Exiting...");
     send_exit_msg();
     m_qps.clear();
     m_ctrl_client->clean_sync();
@@ -76,15 +76,15 @@ CtrlMsgRefType Frontend::recv_ctrl_msg() {
     auto ret = std::get<CtrlMsgRefType>(*m_ctrl_msg_ref_var);
     m_ctrl_msg_ref_var = std::nullopt;
     if constexpr (std::is_same_v<CtrlMsgRefType, CtrlMsg::AckMsgRef>) {
-        SPDLOG_INFO("receive ack msg");
+        SPDLOG_INFO("[Frontend] Receive ack msg");
     } else if constexpr (std::is_same_v<CtrlMsgRefType, CtrlMsg::InitMsgRef>) {
-        SPDLOG_INFO("receive init msg");
+        SPDLOG_INFO("[Frontend] Receive init msg");
     } else if constexpr (std::is_same_v<CtrlMsgRefType, CtrlMsg::InitQpMsgRef>) {
-        SPDLOG_INFO("receive init_qp msg");
+        SPDLOG_INFO("[Frontend] Receive init_qp msg");
     } else if constexpr (std::is_same_v<CtrlMsgRefType, CtrlMsg::ExitMsgRef>) {
-        SPDLOG_INFO("receive exit msg");
+        SPDLOG_INFO("[Frontend] Receive exit msg");
     } else if constexpr (std::is_same_v<CtrlMsgRefType, CtrlMsg::StartCommMsgRef>) {
-        SPDLOG_INFO("receive start_comm msg");
+        SPDLOG_INFO("[Frontend] Receive start_comm msg");
     }
     return ret;
 }
@@ -104,7 +104,7 @@ void Frontend::send_ctrl_msg(ConstBytesView raw_msg) {
 
 void Frontend::send_init_msg(int qp_num) {
     send_ctrl_msg(CtrlMsg::make_init_msg(qp_num));
-    SPDLOG_INFO("send init msg[qp_num={}]", qp_num);
+    SPDLOG_INFO("[Frontend] Send init msg[qp_num={}]", qp_num);
 }
 
 void Frontend::send_init_qp_msg(int qp_id,
@@ -116,13 +116,13 @@ void Frontend::send_init_qp_msg(int qp_id,
         host_resp_mem_addr, host_resp_mem_size,
         req_export_desc, resp_export_desc);
     send_ctrl_msg(init_qp_msg);
-    SPDLOG_INFO("send init_qp msg[qp_id={}, host_req_mem_size={}, host_resp_mem_size={}]",
+    SPDLOG_INFO("[Frontend] Send init_qp msg[qp_id={}, host_req_mem_size={}, host_resp_mem_size={}]",
         qp_id, host_req_mem_size, host_resp_mem_size);
 }
 
 void Frontend::send_exit_msg() {
     send_ctrl_msg(CtrlMsg::make_exit_msg());
-    SPDLOG_INFO("send exit msg");
+    SPDLOG_INFO("[Frontend] Send exit msg");
 }
 
 size_t Frontend::recv_new_conumser_id() {
@@ -131,7 +131,7 @@ size_t Frontend::recv_new_conumser_id() {
     }
     auto ret = *m_new_consumer_id;
     m_new_consumer_id = std::nullopt;
-    SPDLOG_INFO("receive new consumer id={}", *m_new_consumer_id);
+    SPDLOG_INFO("[Frontend] Rceive new consumer id={}", *m_new_consumer_id);
     return ret;
 }
 

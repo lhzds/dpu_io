@@ -20,7 +20,7 @@ FrontendQp::FrontendQp(Frontend &frontend, int id,
         m_req_rb.cap(), DOCA_ACCESS_FLAG_PCI_READ_WRITE);
     m_resp_mmap = std::make_unique<docacxx::Mmap>(frontend.dev(), m_resp_rb.data(),
         m_resp_rb.cap(), DOCA_ACCESS_FLAG_PCI_READ_WRITE);
-    SPDLOG_INFO("create a frontend_qp[id={}]", id);
+    SPDLOG_INFO("[Frontend-Qp#{}] Create", id);
 };
 
 FrontendQp::~FrontendQp() {
@@ -44,11 +44,13 @@ void FrontendQp::create_consumer(Frontend &frontend) {
 
         switch (msg->type) {
             case D2HRbMetaMsg::Type::kReqRbCleanedSize:
-                SPDLOG_INFO("receive req rb size to clean={}", msg->payload.req_rb_cleaned_size);
+                SPDLOG_INFO("[Frontend-Qp#{}] Receive meta msg[Req-Rb: cleaned_size={}]",
+                    m_id, msg->payload.req_rb_cleaned_size);
                 m_req_rb_cleaned_size = msg->payload.req_rb_cleaned_size;
                 break;
             case D2HRbMetaMsg::Type::kRespRbNewSize:
-                SPDLOG_INFO("receive resp rb new size={}", msg->payload.resp_rb_new_size);
+                SPDLOG_INFO("[Frontend-Qp#{}] Receive meta msg[Resp-Rb: new_size={}]",
+                    m_id, msg->payload.resp_rb_new_size);
                 m_resp_rb_new_size = msg->payload.resp_rb_new_size;
                 break;
             default:
@@ -72,7 +74,8 @@ void FrontendQp::post_sync_close(size_t file_number, bool use_fsync) {
 
     m_req_rb.write(req);
     ++m_submitted_req_cnt;
-    SPDLOG_INFO("post a sync close request with size={}[file_num={}]", req.size(), file_number);
+    SPDLOG_INFO("[Frontend-Qp#{}] Post request[SyncClose: file_num={}]"
+        "[Req-Rb: free_space={}]", m_id, file_number, m_req_rb.free_size());
     send_req_rb_new_size(req.size());
 }
 
@@ -97,7 +100,7 @@ void FrontendQp::prep_write(size_t file_number, size_t offset, int base_size_mul
 
 void FrontendQp::append(const ConstBytesView &content) {
     if (not m_is_prep_write) {
-        throw_with("without preparing write");
+        throw_with("need to prep write first");
     }
     if (m_req_rb.cap() < content.size()) {
         throw_with("too large to write to rb");
@@ -113,14 +116,16 @@ void FrontendQp::append(const ConstBytesView &content) {
 
 void FrontendQp::post_write() {
     if (not m_is_prep_write) {
-        throw_with("without preparing write");
+        throw_with("need to prep write first");
     }
     m_reserved_header_space->write({(char *)&m_cache_header, sizeof(m_cache_header)});
     ++m_submitted_req_cnt;
     m_is_prep_write = false;
-    SPDLOG_INFO("post a write request with size={}[file_num={}, offset={}, write_size={}]",
-        sizeof(m_cache_header) + m_cache_header.size, m_cache_header.file_number,
-        m_cache_header.offset, m_cache_header.size);
+    SPDLOG_INFO("[Frontend-Qp#{}] Post request"
+        "[Write: file_num={}, offset={}, write_size={}]"
+        "[Req-Rb: free_space={}]",
+        m_id, m_cache_header.file_number,
+        m_cache_header.offset, m_cache_header.size, m_req_rb.free_size());
     send_req_rb_new_size(sizeof(m_cache_header) + m_cache_header.size);
 }
 
@@ -137,13 +142,15 @@ std::vector<int> FrontendQp::wait_all() {
             auto resp = IoRespMsg::read_from(m_resp_rb);
             switch (resp.type) {
                 case IoRespMsg::Type::kWrite:
-                    SPDLOG_INFO("recvive a write response [file_num={}]", resp.file_number);
+                    SPDLOG_INFO("[Frontend-Qp#{}] Receive response[Write: file_num={}]",
+                        m_id, resp.file_number);
                     if (resp.res < 0) {
                         throw_with("Write error with {}: {}", resp.file_number, strerror(-resp.res));
                     }
                     break;
                 case IoRespMsg::Type::kSyncClose:
-                    SPDLOG_INFO("recvive a sync close response [file_num={}]", resp.file_number);
+                    SPDLOG_INFO("[Frontend-Qp#{}] Receive response[SyncClose: file_num={}]",
+                        m_id, resp.file_number);
                     if (resp.res < 0) {
                         throw_with("Sync close error with {}: {}", resp.file_number, strerror(-resp.res));
                     }
@@ -185,8 +192,8 @@ void FrontendQp::send_wait_stat(size_t wait_size, size_t processed_size) {
 
 void FrontendQp::free_req_rb_space(size_t needed_size) {
     // 提前 submit 一个 post_recv 任务，等待获取 req_rb_head
-    SPDLOG_INFO("free_space={} is not enough, send needed_size={}",
-        m_req_rb.free_size(), needed_size);
+    SPDLOG_INFO("[Frontend-Qp#{}] Send meta msg[Req-Rb: free_space={}, needed_size={}]",
+        m_id, m_req_rb.free_size(), needed_size);
     m_req_rb_cleaned_size = std::nullopt;
     send_req_rb_needed_size(needed_size);
     while (not m_req_rb_cleaned_size) {
@@ -197,15 +204,13 @@ void FrontendQp::free_req_rb_space(size_t needed_size) {
 
 void FrontendQp::wait_new_resps(size_t wait_size, size_t processed_size) {
     // 提前 submit 一个 post_recv 任务，等待获取 req_rb_head
-    SPDLOG_INFO("send wait stat[wait_size={}, processed_size={}]",
-        wait_size, processed_size);
+    SPDLOG_INFO("[Frontend-Qp#{}] Send meta msg[Resp-Rb: wait_size={}, processed_size={}]",
+        m_id, wait_size, processed_size);
     m_resp_rb_new_size = std::nullopt;
     send_wait_stat(wait_size, processed_size);
     while (not m_resp_rb_new_size) {
         doca_pe_progress(m_pe);
     }
-    SPDLOG_INFO("receive new resps with size={}",
-        *m_resp_rb_new_size);
     m_resp_rb.rep().write(*m_resp_rb_new_size);
 }
 

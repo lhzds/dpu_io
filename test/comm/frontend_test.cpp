@@ -46,6 +46,7 @@ constexpr size_t kOpNum = 100;
 //     free(align_mem);
 // }
 
+// 模拟阻塞-空间复用场景
 TEST(FrontendTest, WriteMoreTest) {
     size_t kPageSize = 1024 * 1024;
     auto frontend = std::make_unique<Frontend>(kBackendName, kHostDevPci, 1, kHostReqRbCap, kHostRespRbCap);

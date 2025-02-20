@@ -29,10 +29,18 @@ public:
 class RbMapping {
 public:    
     RbMapping(int id, doca_dev *dev, size_t dpu_rb_cap, ConstBytesView host_mmap_desc,
-        char *host_mem_addr, size_t host_mem_size, QueueDma *dma)
-        : m_id(id), m_dpu_rb(dpu_rb_cap), m_host_rb_rep(host_mem_size), m_dma(dma) {
-        m_dpu_mmap = std::make_unique<docacxx::Mmap>(dev, m_dpu_rb.data(), dpu_rb_cap);
-        m_host_mmap = std::make_unique<docacxx::Mmap>(host_mmap_desc, dev, host_mem_addr, host_mem_size);
+        char *host_rb_data, size_t host_rb_cap, QueueDma *dma)
+        : m_id(id), m_dpu_rb(dpu_rb_cap), m_host_rb_rep(host_rb_cap), m_dma(dma) {
+        m_dpu_mmap = std::make_unique<docacxx::Mmap>(dev, m_dpu_rb.data(), m_dpu_rb.cap());
+        m_host_mmap = std::make_unique<docacxx::Mmap>(host_mmap_desc, dev, host_rb_data, m_host_rb_rep.cap());
+    }
+
+    size_t host_rb_cap() {
+        return m_host_rb_rep.cap();
+    }
+
+    size_t dpu_rb_cap() {
+        return m_dpu_rb.cap();
     }
 
     void set_producer(SingleTaskProducer *producer) {
@@ -68,9 +76,10 @@ public:
     using DpuRbView = RbViewWithStatus<DpuRbViewStatus>;
     using DmaDoneCb = std::function<void(int, DpuRbView &)>;
 
-    void set_dma_done_cb(DmaDoneCb cb) {
-        m_dma_done_cb = std::move(cb);
-    }
+    ReqRbMapping(int id, doca_dev *dev, size_t dpu_rb_cap, ConstBytesView host_mmap_desc,
+        char *host_rb_data, size_t host_rb_cap, QueueDma *dma, DmaDoneCb cb)
+        : RbMapping(id, dev, dpu_rb_cap, host_mmap_desc,
+            host_rb_data, host_rb_cap, dma), m_dma_done_cb(std::move(cb)) {}
 
     void read_async(size_t size) {
         SPDLOG_INFO("[Req-Rb#{}] Receive meta msg[new_size={}][Dpu-Rb: free_size={}]",
@@ -186,9 +195,9 @@ public:
     };
     using DpuRbView = RbViewWithStatus<DpuRbViewStatus>;
     RespRbMapping(int id, doca_dev *dev, size_t dpu_rb_cap, ConstBytesView host_mmap_desc,
-        char *host_mem_addr, size_t host_mem_size, QueueDma *dma)
+        char *host_rb_data, size_t host_rb_cap, QueueDma *dma)
         : RbMapping(id, dev, dpu_rb_cap, host_mmap_desc,
-            host_mem_addr, host_mem_size, dma), m_dmaing_host_rb_rep(host_mem_size) {}
+            host_rb_data, host_rb_cap, dma), m_dmaing_host_rb_rep(host_rb_cap) {}
 
     void append(BytesBuffer data) {
         SPDLOG_INFO("[Resp-Rb#{}] Try to append data to dpu rb[data_size={}, dpu_rb_free_size={}]",
@@ -297,9 +306,9 @@ public:
 
     DmaQpMapping(Backend &backend, int id,
         size_t dpu_req_rb_cap, ConstBytesView host_req_mmap_desc, 
-        char *host_req_mem_addr, size_t host_req_mem_size,
+        char *host_req_rb_data, size_t host_req_rb_cap,
         size_t dpu_resp_rb_cap, ConstBytesView host_resp_mmap_desc,
-        char *host_resp_mem_addr, size_t host_resp_mem_size,
+        char *host_resp_rb_data, size_t host_resp_rb_cap,
         ReqRbMapping::DmaDoneCb req_dma_done_cb);
     ~DmaQpMapping();
 

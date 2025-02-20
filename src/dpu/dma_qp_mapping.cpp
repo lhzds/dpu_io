@@ -85,21 +85,20 @@ RbMapping::make_memcpy_segs(RingBufferRep::Slice src, RingBufferRep::Slice dst) 
 
 DmaQpMapping::DmaQpMapping(Backend &backend, int id,
     size_t dpu_req_rb_cap, ConstBytesView host_req_mmap_desc, 
-    char *host_req_mem_addr, size_t host_req_mem_size,
+    char *host_req_rb_data, size_t host_req_rb_cap,
     size_t dpu_resp_rb_cap, ConstBytesView host_resp_mmap_desc,
-    char *host_resp_mem_addr, size_t host_resp_mem_size,
+    char *host_resp_rb_data, size_t host_resp_rb_cap,
     ReqRbMapping::DmaDoneCb req_dma_done_cb)
     : m_id(id),
     m_req_rb_mapping(id, backend.dev(), dpu_req_rb_cap, host_req_mmap_desc,
-        host_req_mem_addr, host_req_mem_size, backend.dma()),
+        host_req_rb_data, host_req_rb_cap, backend.dma(), std::move(req_dma_done_cb)),
     m_resp_rb_mapping(id, backend.dev(), dpu_resp_rb_cap, host_resp_mmap_desc,
-        host_resp_mem_addr, host_resp_mem_size, backend.dma()) {
+        host_resp_rb_data, host_resp_rb_cap, backend.dma()) {
     SPDLOG_INFO("[Backend] Create dma_qp_mapping"
         "[id={}, dpu_req_rb_cap={}, host_req_rb_cap={}, "
         "dpu_resp_rb_cap={}, host_resp_rb_cap={}]", m_id,
-        dpu_req_rb_cap, host_req_mem_size,
-        dpu_resp_rb_cap, host_resp_mem_size);
-    m_req_rb_mapping.set_dma_done_cb(std::move(req_dma_done_cb));
+        m_req_rb_mapping.dpu_rb_cap(), m_req_rb_mapping.host_rb_cap(),
+        m_resp_rb_mapping.dpu_rb_cap(), m_resp_rb_mapping.host_rb_cap());
 }
 
 DmaQpMapping::~DmaQpMapping() {

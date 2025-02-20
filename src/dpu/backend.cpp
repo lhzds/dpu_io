@@ -66,11 +66,11 @@ Backend::Backend(const std::string_view &name, const std::string_view &dev_pci,
         m_qps.emplace_back(std::make_unique<DmaQpMapping>(*this, i,
             dpu_req_rb_cap,
             ConstBytesView(init_qp_msg.host_req_mmap_desc, header->host_req_mmap_desc_size),
-            header->host_req_mem_addr, header->host_req_mem_size,
+            header->host_req_rb_data, header->host_req_rb_cap,
 
             dpu_resp_rb_cap,
             ConstBytesView(init_qp_msg.host_resp_mmap_desc, header->host_resp_mmap_desc_size),
-            header->host_resp_mem_addr, header->host_resp_mem_size,
+            header->host_resp_rb_data, header->host_resp_rb_cap,
 
             [&](int qp_id, ReqRbMapping::DpuRbView &req_view) { submit_request_to_io_engine(qp_id, req_view); }
         ));

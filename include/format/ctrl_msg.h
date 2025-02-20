@@ -29,10 +29,10 @@ struct CtrlMsg {
     struct InitQpHeader: CommonHeader {
         int qp_id{-1};
         
-        char *host_req_mem_addr{};
-        size_t host_req_mem_size{};
-        char *host_resp_mem_addr{};
-        size_t host_resp_mem_size{};
+        char *host_req_rb_data{};
+        size_t host_req_rb_cap{};
+        char *host_resp_rb_data{};
+        size_t host_resp_rb_cap{};
 
         size_t host_req_mmap_desc_size{};
         size_t host_resp_mmap_desc_size{};
@@ -69,8 +69,8 @@ struct CtrlMsg {
     }
 
     static BytesBuffer make_init_qp_msg(int qp_id,
-        char *host_req_mem_addr, size_t host_req_mem_size,
-        char *host_resp_mem_addr, size_t host_resp_mem_size,
+        char *host_req_rb_data, size_t host_req_rb_cap,
+        char *host_resp_rb_data, size_t host_resp_rb_cap,
         const ConstBytesView &host_req_mmap_desc,
         const ConstBytesView &host_resp_mmap_desc) {
         BytesBuffer buf(sizeof(InitQpHeader) + host_req_mmap_desc.size()
@@ -80,10 +80,10 @@ struct CtrlMsg {
         auto *header = (InitQpHeader *)dst.data();
         header->type = Type::kINitQp;
         header->qp_id = qp_id;
-        header->host_req_mem_addr = host_req_mem_addr;
-        header->host_req_mem_size = host_req_mem_size;
-        header->host_resp_mem_addr = host_resp_mem_addr;
-        header->host_resp_mem_size = host_resp_mem_size;
+        header->host_req_rb_data = host_req_rb_data;
+        header->host_req_rb_cap = host_req_rb_cap;
+        header->host_resp_rb_data = host_resp_rb_data;
+        header->host_resp_rb_cap = host_resp_rb_cap;
         header->host_req_mmap_desc_size = host_req_mmap_desc.size();
         header->host_resp_mmap_desc_size = host_resp_mmap_desc.size();
         dst = dst.subspan(sizeof(InitQpHeader));

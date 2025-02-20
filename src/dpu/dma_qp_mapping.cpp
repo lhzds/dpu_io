@@ -32,20 +32,19 @@ RbMapping::make_memcpy_segs(RingBufferRep::Slice src, RingBufferRep::Slice dst) 
         src_first_part.shrink_forward(copy_size);
 
         // src_second_part 拷贝
-        if (not src.second_part()) {
-            return ret;
-        }
-        if (dst_first_part.size) {
-            copy_size = dst_first_part.size;
-            ret.emplace_back(src_second_part->offset, dst_first_part.offset, copy_size);
-            src_second_part->shrink_forward(copy_size);
-            dst_first_part.shrink_forward(copy_size);
-        }
-        if (dst_second_part) {
-            copy_size = src_second_part->size;
-            ret.emplace_back(src_second_part->offset, dst_second_part->offset, src_second_part->size);
-            dst_second_part->shrink_forward(copy_size);
-            src_second_part->shrink_forward(copy_size);
+        if (src.second_part()) {
+            if (dst_first_part.size) {
+                copy_size = dst_first_part.size;
+                ret.emplace_back(src_second_part->offset, dst_first_part.offset, copy_size);
+                src_second_part->shrink_forward(copy_size);
+                dst_first_part.shrink_forward(copy_size);
+            }
+            if (dst_second_part) {
+                copy_size = src_second_part->size;
+                ret.emplace_back(src_second_part->offset, dst_second_part->offset, src_second_part->size);
+                dst_second_part->shrink_forward(copy_size);
+                src_second_part->shrink_forward(copy_size);
+            }
         }
     } else {
         // src_first_part 拷贝
@@ -60,14 +59,27 @@ RbMapping::make_memcpy_segs(RingBufferRep::Slice src, RingBufferRep::Slice dst) 
         dst_second_part->shrink_forward(copy_size);
 
         // src_second_part 拷贝
-        if (not src.second_part()) {
-            return ret;
+        if (src.second_part()) {
+            copy_size = src_second_part->size;
+            ret.emplace_back(src_second_part->offset, dst_second_part->offset, copy_size);
+            src_second_part->shrink_forward(copy_size);
+            dst_second_part->shrink_forward(copy_size);
         }
-        copy_size = src_second_part->size;
-        ret.emplace_back(src_second_part->offset, dst_second_part->offset, copy_size);
-        src_second_part->shrink_forward(copy_size);
-        dst_second_part->shrink_forward(copy_size);
     }
+#ifndef NDEBUG
+    std::string log_entry = "[Helper] ";
+    for (size_t i{}; i < ret.size(); ++i) {
+        auto &seg = ret[i];
+        if (i) {
+            log_entry.append(", ");
+        }
+        log_entry.append(fmt::format(
+            "Make memcpy segs: seg#{}[src_offset={}, dst_offset={}, size={}]",
+            i, seg.src_offset, seg.dst_offset, seg.size
+        ));
+    }
+    SPDLOG_INFO(log_entry);
+#endif
     return ret;
 }
 
@@ -114,7 +126,7 @@ void DmaQpMapping::create_producer(Backend &backend) {
 
 void DmaQpMapping::recv_h2d_rb_meta_msg(const ConstBytesView &raw_msg) {
     if (raw_msg.size() != sizeof(H2DRbMetaMsg)) {
-        throw_with("wrong h2d msg size ");
+        throw_with("DmaQpMapping: Wrong h2d meta msg size ");
     }
     auto *msg = (H2DRbMetaMsg *)raw_msg.data();
     using Type = H2DRbMetaMsg::Type;
@@ -135,7 +147,7 @@ void DmaQpMapping::recv_h2d_rb_meta_msg(const ConstBytesView &raw_msg) {
             break;
         }
         default:
-            throw_with("unexpected error");
+            throw_with("DmaQpMapping: Unexpected h2d meta msg type");
     }
 }
 

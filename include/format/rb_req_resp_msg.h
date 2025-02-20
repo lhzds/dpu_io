@@ -144,7 +144,7 @@ struct IoReqMsg {
                 return req;
             }
             default:
-                throw_with("unsupported type");
+                throw_with("IoReqMsg: Unexpected type");
         }
     }
 

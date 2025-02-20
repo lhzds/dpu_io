@@ -90,7 +90,7 @@ Backend::Backend(const std::string_view &name, const std::string_view &dev_pci,
             msg_type = msg.header->type;
         }, *m_ctrl_msg_variant);
         if (msg_type != CtrlMsg::Type::kExit) {
-            throw_with("wrong msg type");
+            throw_with("Backend: Unexpected ctrl msg type");
         }
         SPDLOG_INFO("[Backend] Receive exit msg");
         m_is_exited = true;
@@ -191,10 +191,10 @@ void Backend::submit_request_to_io_engine(int qp_id, ReqRbMapping::DpuRbView &re
             SPDLOG_INFO("[Backend] Submit request from qp_id={} to I/O engine"
                 "[Write: file_number={}, offset={}, size={}]",
                 qp_id, header.file_number, header.offset, header.size);
-            auto *cb = IoEngine::CallbackFn::make([&, qp_id](size_t file_number, int res) {
+            auto *cb = IoEngine::CallbackFn::make([&, qp_id, offset=header.offset, size=header.size]
+                (size_t file_number, int res) {
                 SPDLOG_INFO("[Backend] Complete request from qp_id={}"
-                    "[Write: file_number={}]",
-                    qp_id, file_number);
+                    "[Write: file_number={}, offset={}, size={}]", qp_id, file_number, offset, size);
                 auto msg = IoRespMsg::make(IoRespMsg::Type::kWrite, file_number, res);
                 m_qps[qp_id]->finish_req(req_view, std::move(msg));
             });
@@ -217,7 +217,7 @@ void Backend::submit_request_to_io_engine(int qp_id, ReqRbMapping::DpuRbView &re
             break;
         }
         default: {
-            throw_with("unexpected type");
+            throw_with("Backedn: Unexpected request type");
         }
     }
 }

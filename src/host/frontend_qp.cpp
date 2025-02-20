@@ -54,18 +54,18 @@ void FrontendQp::create_consumer(Frontend &frontend) {
                 m_resp_rb_new_size = msg->payload.resp_rb_new_size;
                 break;
             default:
-                throw_with("unexpected D2HRbMetaMsg type");
+                throw_with("FrontendQp: Unexpected D2HRbMetaMsg type");
         }
     });
 }
 
 void FrontendQp::post_sync_close(size_t file_number, bool use_fsync) {
     if (m_is_prep_write) {
-        throw_with("preparing write now");
+        throw_with("FrontendQp: Preparing write now");
     }
     auto req = IoReqMsg::make_sync_close_req(file_number, use_fsync);
     if (m_req_rb.cap() < req.size()) {
-        throw_with("too large to write to rb");
+        throw_with("FrontendQp: Too large to write to rb");
     }
 
     while (m_req_rb.free_size() < req.size()) {
@@ -81,13 +81,13 @@ void FrontendQp::post_sync_close(size_t file_number, bool use_fsync) {
 
 void FrontendQp::prep_write(size_t file_number, size_t offset, int base_size_multiplier) {
     if (m_is_prep_write) {
-        throw_with("already prepared write");
+        throw_with("FrontendQp: Prepare write doubly");
     }
     IoReqMsg::init_write_req_header(m_cache_header, file_number, offset,
         base_size_multiplier);
     size_t new_size = sizeof(m_cache_header);
     if (m_req_rb.cap() < new_size) {
-        throw_with("too large to write to rb");
+        throw_with("FrontendQp: Too large to write to rb");
     }
 
     while (m_req_rb.free_size() < new_size) {
@@ -100,10 +100,10 @@ void FrontendQp::prep_write(size_t file_number, size_t offset, int base_size_mul
 
 void FrontendQp::append(const ConstBytesView &content) {
     if (not m_is_prep_write) {
-        throw_with("need to prep write first");
+        throw_with("FrontendQp: Prepare write first");
     }
     if (m_req_rb.cap() < content.size()) {
-        throw_with("too large to write to rb");
+        throw_with("FrontendQp: Too large to write to rb");
     }
 
     while (m_req_rb.free_size() < content.size()) {
@@ -116,7 +116,7 @@ void FrontendQp::append(const ConstBytesView &content) {
 
 void FrontendQp::post_write() {
     if (not m_is_prep_write) {
-        throw_with("need to prep write first");
+        throw_with("FrontendQp: Prepare write first");
     }
     m_reserved_header_space->write({(char *)&m_cache_header, sizeof(m_cache_header)});
     ++m_submitted_req_cnt;
@@ -142,22 +142,24 @@ std::vector<int> FrontendQp::wait_all() {
             auto resp = IoRespMsg::read_from(m_resp_rb);
             switch (resp.type) {
                 case IoRespMsg::Type::kWrite:
-                    SPDLOG_INFO("[Frontend-Qp#{}] Receive response[Write: file_num={}]",
-                        m_id, resp.file_number);
+                    SPDLOG_INFO("[Frontend-Qp#{}] Read response[Write: file_num={}, res={}][Resp-Rb: head={}, tail={}]",
+                        m_id, resp.file_number, resp.res, m_resp_rb.head(), m_resp_rb.tail());
                     if (resp.res < 0) {
-                        throw_with("Write error with {}: {}", resp.file_number, strerror(-resp.res));
+                        throw_with("FrontendQp: Write error on {}: {}", resp.file_number, strerror(-resp.res));
                     }
                     break;
                 case IoRespMsg::Type::kSyncClose:
-                    SPDLOG_INFO("[Frontend-Qp#{}] Receive response[SyncClose: file_num={}]",
-                        m_id, resp.file_number);
+                    SPDLOG_INFO("[Frontend-Qp#{}] Read response[SyncClose: file_num={}, res={}][Resp-Rb: head={}, tail={}]",
+                        m_id, resp.file_number, resp.res, m_resp_rb.head(), m_resp_rb.tail());
                     if (resp.res < 0) {
-                        throw_with("Sync close error with {}: {}", resp.file_number, strerror(-resp.res));
+                        throw_with("FrontendQp: Sync close error on {}: {}", resp.file_number, strerror(-resp.res));
                     }
                     slot_ids.emplace_back(resp.res);
                     break;
                 default:
-                    throw_with("unsupported type");
+                    SPDLOG_INFO("[Frontend-Qp#{}] Read response[Unexpected Type][Resp-Rb: head={}, tail={}]",
+                        m_id, m_resp_rb.head(), m_resp_rb.tail());
+                    throw_with("FrontendQp: Unexpected response type");
             }
             --wait_req_cnt;
             processed_size += sizeof(IoRespMsg);

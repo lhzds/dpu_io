@@ -21,7 +21,7 @@ public:
     UringEngine(uint32_t queue_depth, std::unique_ptr<SstPool> sst_pool)
         : m_uring(new io_uring), m_sst_pool(std::move(sst_pool)) {
         if (auto ret = io_uring_queue_init(queue_depth, m_uring, 0); ret < 0) {
-            throw_with(fmt::format("Failed to create init uring queue: ", strerror(errno)));
+            throw_with("UringEngine: Failed to create init uring queue: {}", strerror(errno));
         }
 
         m_poller = std::thread([&] {
@@ -82,7 +82,7 @@ public:
             io_data->res = ctx->slot_id;
             m_writing_files.erase(file_number);
         } else {
-            throw_with("unexpected op type");
+            throw_with("UringEngine: Unexpected op type");
         }
 
         if (io_data->cb != nullptr) {
@@ -126,7 +126,7 @@ private:
         auto sst_name = m_sst_pool->slot_file_name(*slot_id);
         ctx->os_fd = open(sst_name.c_str(), O_WRONLY);
         if (ctx->os_fd < 0) {
-            throw_with("Failed to open {}: {}", sst_name, strerror(errno));
+            throw_with("UringEngine: Failed to open {}: {}", sst_name, strerror(errno));
         }
 
         auto [iter, success] = m_writing_files.emplace(file_number, std::move(ctx));
@@ -150,7 +150,7 @@ private:
     void issue_write(int fd, size_t offset, const RingBuffer::View &src, IoData *io_data) {
         io_uring_sqe *sqe = io_uring_get_sqe(m_uring);
         if (sqe == nullptr) {
-            throw_with(fmt::format("Failed to get sqe: ", strerror(errno)));
+            throw_with("UringEngine: Failed to get sqe: {}", strerror(errno));
         }
 
         io_data->iovs[0].iov_base = src.first_part().data();
@@ -165,7 +165,7 @@ private:
         sqe->user_data = reinterpret_cast<uint64_t>(io_data);
         
         if (auto ret = io_uring_submit(m_uring); ret < 0) {
-            throw_with(fmt::format("Failed to submit uring: ", strerror(errno)));
+            throw_with("UringEngine: Failed to submit: {}", strerror(errno));
         }
         m_uring_cqe_cnt.fetch_add(1);
     }
@@ -173,7 +173,7 @@ private:
     void issue_sync_close(int fd, bool use_fsync, IoData *io_data) {
         io_uring_sqe *sqe1 = io_uring_get_sqe(m_uring);
         if (sqe1 == nullptr) {
-            throw_with(fmt::format("Failed to get sqe1: ", strerror(errno)));
+            throw_with("UringEngine: Failed to get sqe1: {}", strerror(errno));
         }
         io_uring_sqe_set_flags(sqe1, IOSQE_IO_LINK);
         if (use_fsync) {
@@ -184,13 +184,13 @@ private:
 
         io_uring_sqe *sqe2 = io_uring_get_sqe(m_uring);
         if (sqe2 == nullptr) {
-            throw_with(fmt::format("Failed to get sqe2: ", strerror(errno)));
+            throw_with("UringEngine: Failed to get sqe2: {}", strerror(errno));
         }
         io_uring_prep_close(sqe2, fd);
         sqe2->user_data = reinterpret_cast<uint64_t>(io_data);
 
         if (auto ret = io_uring_submit(m_uring); ret < 0) {
-            throw_with(fmt::format("Failed to submit uring: ", strerror(errno)));
+            throw_with("UringEngine: Failed to submit uring: {}", strerror(errno));
         }
         m_uring_cqe_cnt.fetch_add(2); // fetch_add 原子加法
     }
@@ -206,10 +206,10 @@ private:
             }
 
             if (auto ret = io_uring_wait_cqe(m_uring, &cqe); ret < 0) {
-                throw_with("Wait cqe: {}", strerror(errno));
+                throw_with("UringEngine: Wait cqe: {}", strerror(errno));
             }
             if (cqe->res < 0) {
-                throw_with("Io error: {}", strerror(-cqe->res));
+                throw_with("UringEngine: Io error: {}", strerror(-cqe->res));
             }
             int res = cqe->res;
             auto *io_data = (IoData *)cqe->user_data;

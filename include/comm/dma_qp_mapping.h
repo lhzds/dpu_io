@@ -82,8 +82,8 @@ public:
         // 用于将 req 插入 req 环形队列
         auto action = [&, hs] {
             auto ds = *m_dpu_rb.rep().write(hs.size()); // 申请空间
-            SPDLOG_INFO("[Req-Rb#{}] Start dmaing[Host->Dpu: dest_offset={}, dma_size={}]",
-                m_id, ds.first_part().offset, ds.size());
+            SPDLOG_INFO("[Req-Rb#{}] Start dmaing[Host->Dpu: src_offset={}, dest_offset={}, dma_size={}]",
+                m_id, hs.first_part().offset, ds.first_part().offset, ds.size());
 
             m_dpu_rb_views.emplace_back(DpuRbViewStatus::kDmaInProgress, m_dpu_rb.view(ds)); // 记录元数据
             auto &dpu_rb_view = m_dpu_rb_views.back();
@@ -222,9 +222,9 @@ private:
             dpu_rb_view.status = DpuRbViewStatus::kDmaInProgress;
             m_dma->post_memcpyv(*m_dpu_mmap, *m_host_mmap,
                 make_memcpy_segs(ds, hs), 
-                [&, offset=ds.first_part().offset] {
-                    SPDLOG_INFO("[Resp-Rb#{}] Finish dmaing[Dpu->Host: dest_offset={}, dma_size={}]",
-                        m_id, offset, dpu_rb_view.inner.size());
+                [&, src_offset = hs.first_part().offset, dest_offset= ds.first_part().offset] {
+                    SPDLOG_INFO("[Resp-Rb#{}] Finish dmaing[Dpu->Host: src_offset={}, dest_offset={}, dma_size={}]",
+                        m_id, src_offset, dest_offset, dpu_rb_view.inner.size());
                     dpu_rb_view.status = DpuRbViewStatus::kDmaDone;
                     for (auto iter = m_dpu_rb_views.begin(); iter != m_dpu_rb_views.end();
                         iter = m_dpu_rb_views.erase(iter)) {

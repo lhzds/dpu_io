@@ -37,7 +37,7 @@ int main() {
         is_exited = true;
         std::string_view msg((char *)data, len);
         if (msg != "Exit") {
-            throw_with("unexpected msg");
+            throw_with("Unexpected msg");
         }
     });
     client.start_sync();

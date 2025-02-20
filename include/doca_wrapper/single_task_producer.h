@@ -90,7 +90,7 @@ private:
     size_t m_consumer_id{};
 
     std::function<void()> m_send_cb {[] {}};
-    std::function<void()> m_send_error_cb {[] { throw_with("send_error");}};
+    std::function<void()> m_send_error_cb {[] { throw_with("SingleTaskProducer: Send error");}};
 
     bool m_is_sended{};
 };

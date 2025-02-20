@@ -118,7 +118,7 @@ struct CtrlMsg {
 
     static RefVariant read(ConstBytesView src) {
         if (src.size() < sizeof(Type)) {
-            throw_with("wrong size to read ctrl msg");
+            throw_with("CtrlMsg: Wrong size");
         }
 
         auto *msg_type = (Type *)src.data();
@@ -127,7 +127,7 @@ struct CtrlMsg {
         switch (*msg_type) {
             case Type::kInit: {
                 if (src.size() < sizeof(InitHeader)) {
-                    throw_with("wrong size to read init ctrl msg");
+                    throw_with("CtrlMsg: Wrong init msg size");
                 }
                 InitMsgRef init_msg;
                 init_msg.header = (InitHeader *)src.data();
@@ -135,27 +135,27 @@ struct CtrlMsg {
             }
             case Type::kINitQp: {
                 if (src.size() < sizeof(InitQpHeader)) {
-                    throw_with("wrong size to read init qp ctrl msg");
+                    throw_with("CtrlMsg: Wrong init_qp msg size");
                 }
                 InitQpMsgRef init_qp_msg;
                 init_qp_msg.header = (InitQpHeader *)src.data();
                 src = src.subspan(sizeof(InitQpHeader));
 
                 if (src.size() < init_qp_msg.header->host_req_mmap_desc_size) {
-                    throw_with("wrong size to read init qp ctrl msg");
+                    throw_with("CtrlMsg: Wrong init_qp msg size");
                 }
                 init_qp_msg.host_req_mmap_desc = src.data();
                 src = src.subspan(init_qp_msg.header->host_req_mmap_desc_size);
 
                 if (src.size() < init_qp_msg.header->host_resp_mmap_desc_size) {
-                    throw_with("wrong size to read init qp ctrl msg");
+                    throw_with("CtrlMsg: Wrong init_qp msg size");
                 }
                 init_qp_msg.host_resp_mmap_desc = src.data();
                 return init_qp_msg;
             }
             case Type::kStartComm: {
                 if (src.size() < sizeof(StartCommHeader)) {
-                    throw_with("wrong size to read start_comm msg");
+                    throw_with("CtrlMsg: Wrong start_comm msg size");
                 }
                 StartCommMsgRef start_comm_msg;
                 start_comm_msg.header = (StartCommHeader *)src.data();
@@ -163,7 +163,7 @@ struct CtrlMsg {
             }      
             case Type::kExit: {
                 if (src.size() < sizeof(ExitHeader)) {
-                    throw_with("wrong size to read exit ctrl msg");
+                    throw_with("CtrlMsg: Wrong exit msg size");
                 }
                 ExitMsgRef exit_msg;
                 exit_msg.header = (ExitHeader *)src.data();
@@ -171,14 +171,14 @@ struct CtrlMsg {
             }
             case Type::kAck: {
                 if (src.size() < sizeof(AckHeader)) {
-                    throw_with("wrong size to read ack ctrl msg");
+                    throw_with("CtrlMsg: Wrong ack msg size");
                 }
                 AckMsgRef ack_msg;
                 ack_msg.header = (AckHeader *)src.data();
                 return ack_msg;
             }
             default:
-                throw_with("unsupported type");
+                throw_with("CtrlMsg: Unexpected type");
         }
     }
 };

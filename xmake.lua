@@ -1,8 +1,8 @@
 add_rules("mode.debug", "mode.release")
 set_languages("c++20")
 
-if is_mode("debug") then
-    add_defines("SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG")
+if not is_mode("debug") then
+    add_defines("SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_OFF")
 end
 add_defines("SPDLOG_FMT_EXTERNAL")
 

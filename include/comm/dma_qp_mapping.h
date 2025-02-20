@@ -83,35 +83,37 @@ public:
         // 用于将 req 插入 req 环形队列
         auto action = [&, hs] {
             auto ds = *m_dpu_rb.rep().write(hs.size()); // 申请空间
-            SPDLOG_INFO("[Req-Rb#{}] Start dmaing[Host->Dpu: src_offset={}, dest_offset={}, dma_size={}]",
+            SPDLOG_INFO("[Req-Rb#{}] Start dmaing[Host->Dpu: src_offset={}, dest_offset={}, size={}]",
                 m_id, hs.first_part().offset, ds.first_part().offset, ds.size());
 
             m_dpu_rb_views.emplace_back(DpuRbViewStatus::kDmaInProgress, m_dpu_rb.view(ds)); // 记录元数据
             auto &dpu_rb_view = m_dpu_rb_views.back();
             m_dma->post_memcpyv(*m_host_mmap, *m_dpu_mmap,
                 make_memcpy_segs(hs, ds),
-                [&] {
+                [&, src_offset=hs.first_part().offset, dest_offset=ds.first_part().offset] {
+                    SPDLOG_INFO("[Req-Rb#{}] Finish dmaing[Host->Dpu: src_offset={}, dest_offset={}, size={}]",
+                        m_id, src_offset, dest_offset, dpu_rb_view.inner.size());
+
                     dpu_rb_view.status.inner = DpuRbViewStatus::kProcessing;
+                    size_t new_host_cleaned_size{};
                     for (auto &v : m_dpu_rb_views) {
                         if (v.status.inner == DpuRbViewStatus::kDmaInProgress) {
                             break;
                         }
                         if (not v.status.is_host_cleaned) {
-                            m_host_size_cleaned += v.inner.size();
+                            new_host_cleaned_size += v.inner.size();
                             v.status.is_host_cleaned = true;
                         }
                     }
-                    auto ds = m_dpu_rb.slice(dpu_rb_view.inner);
-                    SPDLOG_INFO("[Req-Rb#{}] Finish dmaing[Host->Dpu: dest_offset={}, dma_size={}]"
-                        "[Host-Req-Rb: cleaned_size={}]",
-                        m_id, ds.first_part().offset, ds.size(), m_host_size_cleaned);
+
+                    SPDLOG_INFO("[Req-Rb#{}] Get the new reclaimed space of host req rb[size={}]", m_id, new_host_cleaned_size);
+                    m_host_cleaned_size += new_host_cleaned_size;
                     try_send_cleaned_size();
                     if (m_dma_done_cb) {
                         m_dma_done_cb(m_id, dpu_rb_view); 
                     }
                 });
         };
-
         m_dpu_rb_space_wait_eq.do_or_wait(std::move(cond), std::move(action));
     }
 
@@ -127,37 +129,46 @@ public:
             m_id, dpu_rb_slice.first_part().offset, dpu_rb_slice.size());
         
         dpu_rb_view.status.inner = DpuRbViewStatus::kInvalided;
+        size_t new_dpu_cleaned_size{};
         for (auto iter = m_dpu_rb_views.begin(); iter != m_dpu_rb_views.end();
             iter = m_dpu_rb_views.erase(iter)) {
             if (iter->status.inner != DpuRbViewStatus::kInvalided) {
                 break;
             }
-            m_dpu_rb.read(iter->inner.size());
+            new_dpu_cleaned_size += iter->inner.size();
         }
         
+        SPDLOG_INFO("[Req-Rb#{}] Get the new reclaimed space of dpu req rb[size={}]", m_id, new_dpu_cleaned_size);
+        m_dpu_rb.read(new_dpu_cleaned_size);
         // 触发 dpu 队列空间等待事件
         m_dpu_rb_space_wait_eq.try_trigger();
     }
 
 private:
     void try_send_cleaned_size() {
-        if (m_host_needed_size > 0 && m_host_size_cleaned >= m_host_needed_size) {
+        if (m_host_needed_size == 0) {
+            return;
+        }
+
+        SPDLOG_INFO("[Req-Rb#{}] Try send meta msg[needed_size={}, cleaned_size={}]",
+            m_id, m_host_needed_size, m_host_cleaned_size);
+        if (m_host_cleaned_size >= m_host_needed_size) {
             // 大端/小端字节序？
             auto *d2h_rb_meta_msg = (D2HRbMetaMsg *)m_producer->buf_data();
             d2h_rb_meta_msg->type = D2HRbMetaMsg::Type::kReqRbCleanedSize;
-            d2h_rb_meta_msg->payload.req_rb_cleaned_size = m_host_size_cleaned;
+            d2h_rb_meta_msg->payload.req_rb_cleaned_size = m_host_cleaned_size;
             auto ret = m_producer->try_submit_send_task(sizeof(*d2h_rb_meta_msg));
             assert(ret);
-            SPDLOG_INFO("[Req-Rb#{}] Send meta msg[cleaned_size={}]", m_id, m_host_size_cleaned);
+            SPDLOG_INFO("[Req-Rb#{}] Send meta msg[cleaned_size={}]", m_id, m_host_cleaned_size);
             
-            m_host_rb_rep.read(m_host_size_cleaned);
-            m_host_size_cleaned = 0;
+            m_host_rb_rep.read(m_host_cleaned_size);
+            m_host_cleaned_size = 0;
             m_host_needed_size = 0;
         }
     }
 
     // 因为用了结构化绑定，因此修改成员顺序时注意对结构化绑定顺序也进行调整
-    size_t m_host_size_cleaned{}; // host head 增量
+    size_t m_host_cleaned_size{}; // host head 增量
     size_t m_host_needed_size{}; // 决定是否发送增量
 
     std::list<DpuRbView> m_dpu_rb_views; // 记录处于消息队列中的所有不定长消息
@@ -180,7 +191,7 @@ public:
             host_mem_addr, host_mem_size, dma), m_dmaing_host_rb_rep(host_mem_size) {}
 
     void append(BytesBuffer data) {
-        SPDLOG_INFO("[Resp-Rb#{}] Try to append data[size={}] to dpu rb[free_size={}]",
+        SPDLOG_INFO("[Resp-Rb#{}] Try to append data to dpu rb[data_size={}, dpu_rb_free_size={}]",
             m_id, data.size(), m_dpu_rb.free_size());
         auto cond = [&, expected_size=data.size()] {
             return m_dpu_rb.free_size() >= expected_size;
@@ -196,7 +207,7 @@ public:
     }    
 
     void receive_wait_stat(size_t processed_size, size_t wait_size) {
-        SPDLOG_INFO("[Resp-Rb#{}] Receive meta msg[processed={}, wait_size={}]",
+        SPDLOG_INFO("[Resp-Rb#{}] Receive meta msg[WaitStat: processed={}, wait_size={}]",
             m_id, processed_size, wait_size);
         m_host_rb_rep.read(processed_size);
         m_dmaing_host_rb_rep.read(processed_size);
@@ -204,70 +215,74 @@ public:
         m_host_rb_space_wait_eq.try_trigger();
 
         m_host_wait_size = wait_size;
-        try_send_size_to_add();
+        try_send_new_size();
     }
 
 private:
     void start_dma(DpuRbView &dpu_rb_view) {
-        SPDLOG_INFO("[Resp-Rb#{}] Try to start dmaing[Dpu->Host: size={}][Host-Rb: dmaing_free_size={}]",
+        SPDLOG_INFO("[Resp-Rb#{}] Try to start dmaing[Dpu->Host: data_size={}, host_rb_free_size={}]",
             m_id, dpu_rb_view.inner.size(), m_dmaing_host_rb_rep.free_size());
         auto cond = [&, expected_size = dpu_rb_view.inner.size()]() -> bool {
             return m_dmaing_host_rb_rep.free_size() >= expected_size;
         };
         auto action = [&] {
             auto ds = m_dpu_rb.slice(dpu_rb_view.inner);
-            SPDLOG_INFO("[Resp-Rb#{}] Start dmaing[Dpu->Host: dest_offset={}, dma_size={}]",
-                m_id, ds.first_part().offset, ds.size());
             auto hs = *m_dmaing_host_rb_rep.write(dpu_rb_view.inner.size());
+            SPDLOG_INFO("[Resp-Rb#{}] Start dmaing[Dpu->Host: src_offset={}, dest_offset={}, size={}]",
+                m_id, hs.first_part().offset, ds.first_part().offset, ds.size());
+
             // TODO: 添加 DMA size 的最小阈值
             dpu_rb_view.status = DpuRbViewStatus::kDmaInProgress;
             m_dma->post_memcpyv(*m_dpu_mmap, *m_host_mmap,
                 make_memcpy_segs(ds, hs), 
                 [&, src_offset = hs.first_part().offset, dest_offset= ds.first_part().offset] {
-                    SPDLOG_INFO("[Resp-Rb#{}] Finish dmaing[Dpu->Host: src_offset={}, dest_offset={}, dma_size={}]",
+                    SPDLOG_INFO("[Resp-Rb#{}] Finish dmaing[Dpu->Host: src_offset={}, dest_offset={}, size={}]",
                         m_id, src_offset, dest_offset, dpu_rb_view.inner.size());
                     dpu_rb_view.status = DpuRbViewStatus::kDmaDone;
-                    size_t new_dma_done_size{};
+                    size_t new_size{};
                     for (auto iter = m_dpu_rb_views.begin(); iter != m_dpu_rb_views.end();
                         iter = m_dpu_rb_views.erase(iter)) {
                         if (iter->status != DpuRbViewStatus::kDmaDone) {
                             break;
                         }
-                        new_dma_done_size += iter->inner.size();
+                        new_size += iter->inner.size();
                     }
-                    m_dma_done_size += new_dma_done_size;
-                    m_dpu_rb.read(new_dma_done_size);
-                    try_send_size_to_add();
+                    SPDLOG_INFO("[Req-Rb#{}] Get the new space for (dpu rb to reclaim / host rb to read)[size={}]",
+                        m_id, new_size);
+                    m_host_new_size += new_size;
+                    m_dpu_rb.read(new_size);
+                    try_send_new_size();
                     m_dpu_rb_space_wait_eq.try_trigger();
                 });
         };
-
         m_host_rb_space_wait_eq.do_or_wait(std::move(cond), std::move(action));
     }
 
-    void try_send_size_to_add() {
+    void try_send_new_size() {
         // TODO: 或许可以添加发送的最小阈值控制对端处理的粒度
         if (m_host_wait_size == 0) {
             return;
         }
         size_t host_rb_free_size = m_host_rb_rep.free_size() / sizeof(IoRespMsg) * sizeof(IoRespMsg);
         size_t target = std::min(host_rb_free_size, m_host_wait_size);
-        if (m_dma_done_size >= target) {
+        SPDLOG_INFO("[Req-Rb#{}] Try send meta msg[target={}, new_size={}]",
+            m_id, target, m_host_new_size);
+        if (m_host_new_size >= target) {
             auto *d2h_rb_meta_msg = (D2HRbMetaMsg *)m_producer->buf_data();
             d2h_rb_meta_msg->type = D2HRbMetaMsg::Type::kRespRbNewSize;
             d2h_rb_meta_msg->payload.resp_rb_new_size = target;
             auto ret = m_producer->try_submit_send_task(sizeof(*d2h_rb_meta_msg));
             assert(ret);
-            SPDLOG_INFO("[Resp-Rb#{}] Send meta msg[dma_done_size={}]", m_id, target);
+            SPDLOG_INFO("[Resp-Rb#{}] Send meta msg[new_size={}]", m_id, target);
 
             m_host_rb_rep.write(target);
-            m_dma_done_size -= target;
+            m_host_new_size -= target;
             m_host_wait_size -= target;
         }
     }
 
     // 因为用了结构化绑定，因此修改成员顺序时注意对结构化绑定顺序也进行调整
-    size_t m_dma_done_size{};
+    size_t m_host_new_size{};
     size_t m_host_wait_size{};
     RingBufferRep m_dmaing_host_rb_rep;
 

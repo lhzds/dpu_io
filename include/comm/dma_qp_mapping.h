@@ -9,6 +9,7 @@
 #include "doca_wrapper/single_task_producer.h"
 #include "doca_wrapper/passive_consumer.h"
 #include "format/rb_meta_msg.h"
+#include "format/rb_req_resp_msg.h"
 #include "ring_buffer.h"
 #include "types.h"
 
@@ -226,13 +227,16 @@ private:
                     SPDLOG_INFO("[Resp-Rb#{}] Finish dmaing[Dpu->Host: src_offset={}, dest_offset={}, dma_size={}]",
                         m_id, src_offset, dest_offset, dpu_rb_view.inner.size());
                     dpu_rb_view.status = DpuRbViewStatus::kDmaDone;
+                    size_t new_dma_done_size{};
                     for (auto iter = m_dpu_rb_views.begin(); iter != m_dpu_rb_views.end();
                         iter = m_dpu_rb_views.erase(iter)) {
                         if (iter->status != DpuRbViewStatus::kDmaDone) {
                             break;
                         }
-                        m_dma_done_size += iter->inner.size();
+                        new_dma_done_size += iter->inner.size();
                     }
+                    m_dma_done_size += new_dma_done_size;
+                    m_dpu_rb.read(new_dma_done_size);
                     try_send_size_to_add();
                     m_dpu_rb_space_wait_eq.try_trigger();
                 });
@@ -246,7 +250,8 @@ private:
         if (m_host_wait_size == 0) {
             return;
         }
-        size_t target = std::min(m_host_rb_rep.free_size(), m_host_wait_size);
+        size_t host_rb_free_size = m_host_rb_rep.free_size() / sizeof(IoRespMsg) * sizeof(IoRespMsg);
+        size_t target = std::min(host_rb_free_size, m_host_wait_size);
         if (m_dma_done_size >= target) {
             auto *d2h_rb_meta_msg = (D2HRbMetaMsg *)m_producer->buf_data();
             d2h_rb_meta_msg->type = D2HRbMetaMsg::Type::kRespRbNewSize;

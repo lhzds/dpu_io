@@ -11,9 +11,10 @@ constexpr char kHostDevPci[]{"b1:00.1"};
 constexpr char kDpuDevPci[]{"03:00.1"};
 constexpr char kDpuDevRepPci[]{"b1:00.1"};
 
-constexpr size_t kHostReqRbCap{512 * MB}; // 512MB
-constexpr size_t kHostRespRbCap{16 * MB}; // 1 KB
-constexpr size_t kDpuReqRbCap{kHostRespRbCap};
+// 容量设置较小，用于测试空间复用场景
+constexpr size_t kHostReqRbCap{32 * MB};
+constexpr size_t kHostRespRbCap{96};
+constexpr size_t kDpuReqRbCap{kHostReqRbCap};
 constexpr size_t kDpuRespRbCap{kHostRespRbCap};
 
 const std::string kHostSstPoolDir{"/home/olh/mnt/local/nvme3n1"};

@@ -46,16 +46,19 @@ constexpr size_t kOpNum = 100;
 //     free(align_mem);
 // }
 
-// 模拟阻塞-空间复用场景
+
 TEST(FrontendTest, WriteMoreTest) {
-    size_t kPageSize = 1024 * 1024;
+    size_t kPageSize = std::min(size_t(1024 * 1024), kHostReqRbCap / 32);
+    size_t kWriteSize = 4 * 1024 * 1024;
+    size_t kFileCnt = 1;
+
     auto frontend = std::make_unique<Frontend>(kBackendName, kHostDevPci, 1, kHostReqRbCap, kHostRespRbCap);
     auto *qp = frontend->alloc_qp();
 
     char ch = random();
     std::string target(kPageSize, ch);
-    for (size_t file_num = 1; file_num <= kSstBasePoolSize; ++file_num) {
-        for (size_t offset = 0; offset < kSstFileBaseSize; offset += kPageSize) {
+    for (size_t file_num = 1; file_num <= kFileCnt; ++file_num) {
+        for (size_t offset = 0; offset < kWriteSize; offset += kPageSize) {
             qp->prep_write(file_num, offset);
             qp->append(target);
             qp->post_write();
@@ -74,7 +77,7 @@ TEST(FrontendTest, WriteMoreTest) {
             throw_with("Failed to open {}: {}", slot_fname, strerror(errno));
         }
 
-        for (size_t offset = 0; offset < kSstFileBaseSize; offset += kPageSize) {
+        for (size_t offset = 0; offset < kWriteSize; offset += kPageSize) {
             int ret = read(fd, align_mem, kPageSize);
             if (ret < 0) {
                 throw_with("Failed to read: {}", strerror(errno));

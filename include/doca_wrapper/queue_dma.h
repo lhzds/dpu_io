@@ -33,18 +33,19 @@ public:
         if (size > cap().max_buf_size) {
             PartIterator part_iter(size, cap().max_buf_size);
             auto *heap_cb = new std::function<void()>(std::move(cb));
-            std::shared_ptr<std::function<void()>> shared_cb(heap_cb, [](auto *cb) {
-                cb->operator()();
-            });
+            std::shared_ptr<std::function<void()>> shared_cb(heap_cb);
             
             while (part_iter.has_next()) {
                 auto [part_offset, part_size] = part_iter.next();
-                m_memcpy_ctx.submit([&, size, shared_cb, part_size, part_offset, src_offset, dst_offset] {
+                m_memcpy_ctx.submit([&, size, shared_cb, src_offset, dst_offset, part_offset, part_size] {
                     auto src = m_buf_inv.get_buf(src_mmap, src_offset + part_offset, part_size).release();
                     src->set_doca_buf_data(size);
                     auto dst = m_buf_inv.get_buf(dst_mmap, dst_offset + part_offset, part_size).release();
 
                     auto task = alloc_memcpy_task(*src, *dst, [src, dst, shared_cb](const MemcpyTask &) {
+                        if (shared_cb.use_count() == 1) {
+                            shared_cb->operator()();
+                        }
                         delete src;
                         delete dst;
                     });
@@ -71,11 +72,13 @@ public:
     void post_memcpyv(docacxx::Mmap &src_mmap, docacxx::Mmap &dst_mmap,
         const std::vector<MemcpySeg> &memcpy_segs, std::function<void()> cb) {
         auto *heap_cb = new std::function<void()>(std::move(cb));
-        std::shared_ptr<std::function<void()>> shared_cb(heap_cb, [](auto *cb) {
-            cb->operator()();
-        });
+        std::shared_ptr<std::function<void()>> shared_cb(heap_cb);
         for (const auto &seg : memcpy_segs) {
-            post_memcpy(src_mmap, seg.src_offset, dst_mmap, seg.dst_offset, seg.size, [shared_cb] {});
+            post_memcpy(src_mmap, seg.src_offset, dst_mmap, seg.dst_offset, seg.size, [shared_cb] {
+                if (shared_cb.use_count() == 1) { // 确保只有在 memcpy 成功时才会调用 cb
+                    shared_cb->operator()();
+                }
+            });
         }
     }
 

@@ -50,6 +50,32 @@ public:
     std::unique_ptr<QueueDma> dma;
 };
 
+TEST_F(QueueDmaTest, SimpleTest) {
+    size_t mem_size = 120;
+    size_t cp_size = 24;
+    size_t total_task_num = mem_size / cp_size;
+
+    size_t task_slot_num = 1;
+
+    create_dma(task_slot_num);
+    create_mmap(mem_size);
+
+    for (size_t i{}; i < total_task_num; ++i) {
+        std::memset(src_mmap->data() + i * cp_size, (random() % 128), cp_size);
+        QueueDma::MemcpySeg seg(i * cp_size, i * cp_size, cp_size);
+        
+        bool is_finished{};
+        dma->post_memcpyv(*src_mmap, *dst_mmap, {seg}, [&] {
+            is_finished = true;
+        });
+        while (not is_finished) {
+            doca_pe_progress(pe);
+        }
+    }
+
+    ASSERT_EQ(std::memcmp(src_mmap->data(), dst_mmap->data(), src_mmap->size()), 0);
+}
+
 TEST_F(QueueDmaTest, PipelineMemcpy) {
     // 实际任务数大于任务槽数
     size_t mem_size = (1 << 12);
@@ -63,11 +89,11 @@ TEST_F(QueueDmaTest, PipelineMemcpy) {
     create_mmap(mem_size);
 
     for (size_t i{}; i < total_task_num; ++i) {
-        std::memcpy(src_mmap->data() + i * sizeof(size_t), &i, sizeof(size_t));
+        std::memset(src_mmap->data() + i * cp_size, (random() % 128), cp_size);
     }
     for (size_t i{}; i < total_task_num; ++i) {
         ++pending_task_num;
-        dma->post_memcpy(*src_mmap, i * sizeof(size_t), *dst_mmap, i * sizeof(size_t), sizeof(size_t), [&] {
+        dma->post_memcpy(*src_mmap, i * cp_size, *dst_mmap, i * cp_size, cp_size, [&] {
             --pending_task_num;
         });
     }
@@ -86,15 +112,14 @@ TEST_F(QueueDmaTest, PipelineMemcpyV) {
     size_t total_task_num = mem_size / cp_size;
 
     size_t task_slot_num = 128;
-    size_t pending_task_num{};
 
     create_dma(task_slot_num);
     create_mmap(mem_size);
 
     std::vector<QueueDma::MemcpySeg> segs;
     for (size_t i{}; i < total_task_num; ++i) {
-        std::memcpy(src_mmap->data() + i * sizeof(size_t), &i, sizeof(size_t));
-        segs.emplace_back(i * sizeof(size_t), i * sizeof(size_t), sizeof(size_t));
+        std::memset(src_mmap->data() + i * cp_size, (random() % 128), cp_size);
+        segs.emplace_back(i * cp_size, i * cp_size, cp_size);
     }
 
     bool is_finished{};

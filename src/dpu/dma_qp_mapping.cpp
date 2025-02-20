@@ -23,43 +23,50 @@ RbMapping::make_memcpy_segs(RingBufferRep::Slice src, RingBufferRep::Slice dst) 
     auto src_second_part = src.second_part();
     auto dst_second_part = dst.second_part();
 
+    size_t copy_size{};
     if (dst_first_part.size >= src_first_part.size) {
         // src_first_part 拷贝
-        ret.emplace_back(src_first_part.offset, dst_first_part.offset, src_first_part.size);
-        src_first_part.shrink_forward(src_first_part.size);
-        dst_first_part.shrink_forward(src_first_part.size);
+        copy_size = src_first_part.size;
+        ret.emplace_back(src_first_part.offset, dst_first_part.offset, copy_size);
+        dst_first_part.shrink_forward(copy_size);
+        src_first_part.shrink_forward(copy_size);
 
         // src_second_part 拷贝
         if (not src.second_part()) {
             return ret;
         }
         if (dst_first_part.size) {
-            ret.emplace_back(src_second_part->offset, dst_first_part.offset, dst_first_part.size);
-            src_second_part->shrink_forward(dst_first_part.size);
-            dst_first_part.shrink_forward(dst_first_part.size);
+            copy_size = dst_first_part.size;
+            ret.emplace_back(src_second_part->offset, dst_first_part.offset, copy_size);
+            src_second_part->shrink_forward(copy_size);
+            dst_first_part.shrink_forward(copy_size);
         }
         if (dst_second_part) {
+            copy_size = src_second_part->size;
             ret.emplace_back(src_second_part->offset, dst_second_part->offset, src_second_part->size);
-            src_second_part->shrink_forward(src_second_part->size);
-            dst_second_part->shrink_forward(src_second_part->size);
+            dst_second_part->shrink_forward(copy_size);
+            src_second_part->shrink_forward(copy_size);
         }
     } else {
         // src_first_part 拷贝
-        ret.emplace_back(src_first_part.offset, dst_first_part.offset, dst_first_part.size);
-        src_first_part.shrink_forward(dst_first_part.size);
-        dst_first_part.shrink_forward(dst_first_part.size);
+        copy_size = dst_first_part.size;
+        ret.emplace_back(src_first_part.offset, dst_first_part.offset, copy_size);
+        src_first_part.shrink_forward(copy_size);
+        dst_first_part.shrink_forward(copy_size);
 
-        ret.emplace_back(src_first_part.offset, dst_second_part->offset, src_first_part.size);
-        src_first_part.shrink_forward(src_first_part.size);
-        dst_second_part->shrink_forward(src_first_part.size);
+        copy_size = src_first_part.size;
+        ret.emplace_back(src_first_part.offset, dst_second_part->offset, copy_size);
+        src_first_part.shrink_forward(copy_size);
+        dst_second_part->shrink_forward(copy_size);
 
         // src_second_part 拷贝
         if (not src.second_part()) {
             return ret;
         }
-        ret.emplace_back(src_second_part->offset, dst_second_part->offset, src_second_part->size);
-        src_second_part->shrink_forward(src_second_part->size);
-        dst_second_part->shrink_forward(src_second_part->size);
+        copy_size = src_second_part->size;
+        ret.emplace_back(src_second_part->offset, dst_second_part->offset, copy_size);
+        src_second_part->shrink_forward(copy_size);
+        dst_second_part->shrink_forward(copy_size);
     }
     return ret;
 }

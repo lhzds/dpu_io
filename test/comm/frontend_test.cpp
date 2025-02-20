@@ -54,8 +54,8 @@ TEST(FrontendTest, WriteMoreTest) {
 
     char ch = random();
     std::string target(kPageSize, ch);
-    for (size_t file_num = 1; file_num <= 8; ++file_num) {
-        for (size_t offset = 0; offset < kFileSizeBase; offset += kPageSize) {
+    for (size_t file_num = 1; file_num <= kSstBasePoolSize; ++file_num) {
+        for (size_t offset = 0; offset < kSstFileBaseSize; offset += kPageSize) {
             qp->prep_write(file_num, offset);
             qp->append(target);
             qp->post_write();
@@ -74,7 +74,7 @@ TEST(FrontendTest, WriteMoreTest) {
             throw_with("Failed to open {}: {}", slot_fname, strerror(errno));
         }
 
-        for (size_t offset = 0; offset < kFileSizeBase; offset += kPageSize) {
+        for (size_t offset = 0; offset < kSstFileBaseSize; offset += kPageSize) {
             int ret = read(fd, align_mem, kPageSize);
             if (ret < 0) {
                 throw_with("Failed to read: {}", strerror(errno));

@@ -14,6 +14,30 @@
 #include "util.h"
 
 namespace pulsedb {
+
+void TEST_print_resp_rb_view(const ConstBytesView &data) {
+#ifndef NDEBUG
+    auto *resp = (IoRespMsg *)data.data();
+    std::string type_str;
+    if (resp->type == IoRespMsg::Type::kWrite) {
+        type_str = "Write";
+    } else if (resp->type == IoRespMsg::Type::kSyncClose) {
+        type_str = "SyncClose";
+    } else {
+        type_str = "Unexpected";
+    }
+    std::cout << fmt::format("IoRespMsg[Type={}, file_number={}, res={}]",
+        type_str, resp->file_number, resp->res) << std::endl;;
+#endif
+}
+        
+void TEST_print_resp_rb_view(const RingBuffer::View &v) {
+#ifndef NDEBUG
+    auto data = v.merge();
+    TEST_print_resp_rb_view(data);
+#endif
+}
+
 std::vector<QueueDma::MemcpySeg>
 RbMapping::make_memcpy_segs(RingBufferRep::Slice src, RingBufferRep::Slice dst) {
     assert(src.size() == dst.size());

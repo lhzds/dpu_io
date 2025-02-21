@@ -17,6 +17,9 @@ namespace pulsedb {
 
 class Backend;
 
+void TEST_print_resp_rb_view(const ConstBytesView &data);
+void TEST_print_resp_rb_view(const RingBuffer::View &v);
+
 template<typename StautsEnum>
 struct RbViewWithStatus {
 public:
@@ -82,7 +85,7 @@ public:
             host_rb_data, host_rb_cap, dma), m_dma_done_cb(std::move(cb)) {}
 
     void read_async(size_t size) {
-        SPDLOG_INFO("[Req-Rb#{}] Receive meta msg[new_size={}][Dpu-Rb: free_size={}]",
+        SPDLOG_INFO("[Req-Rb#{}] Receive meta msg[NewSize: new_size={}, dpu_rb_free_size={}]",
             m_id, size, m_dpu_rb.free_size());
         auto hs = *m_host_rb_rep.write(size);
         // 用于判断 dpu_req_rb 是否有空间，否则放入等待队列
@@ -200,14 +203,15 @@ public:
             host_rb_data, host_rb_cap, dma), m_dmaing_host_rb_rep(host_rb_cap) {}
 
     void append(BytesBuffer data) {
-        SPDLOG_INFO("[Resp-Rb#{}] Try to append data to dpu rb[data_size={}, dpu_rb_free_size={}]",
-            m_id, data.size(), m_dpu_rb.free_size());
+        SPDLOG_INFO("[Resp-Rb#{}] Try to append data to dpu rb[data_size={}, dpu_rb_head={},"
+                    "dpu_rb_tail={}, dpu_rb_free_size={}]",
+                    m_id, data.size(), m_dpu_rb.head(), m_dpu_rb.tail(), m_dpu_rb.free_size());
         auto cond = [&, expected_size=data.size()] {
             return m_dpu_rb.free_size() >= expected_size;
         };
-        auto action = [&, data = std::move(data)] {
-            auto dpu_rb_view = *m_dpu_rb.reserve_space(data.size());
-            dpu_rb_view.write(data);
+        auto action = [&, d = std::move(data)] {
+            auto dpu_rb_view = *m_dpu_rb.reserve_space(d.size());
+            dpu_rb_view.write(d);
             m_dpu_rb_views.emplace_back(DpuRbViewStatus::kInit, dpu_rb_view);
             start_dma(m_dpu_rb_views.back());
         };
@@ -229,22 +233,24 @@ public:
 
 private:
     void start_dma(DpuRbView &dpu_rb_view) {
-        SPDLOG_INFO("[Resp-Rb#{}] Try to start dmaing[Dpu->Host: data_size={}, host_rb_free_size={}]",
-            m_id, dpu_rb_view.inner.size(), m_dmaing_host_rb_rep.free_size());
+        auto ds = m_dpu_rb.slice(dpu_rb_view.inner);
+        SPDLOG_INFO("[Resp-Rb#{}] Append data, try to start dmaing[Dpu->Host: src_offset={}, "
+            "data_size={}, host_rb_free_size={}]",
+            m_id, ds.first_part().offset, dpu_rb_view.inner.size(),
+            m_dmaing_host_rb_rep.free_size());
         auto cond = [&, expected_size = dpu_rb_view.inner.size()]() -> bool {
             return m_dmaing_host_rb_rep.free_size() >= expected_size;
         };
-        auto action = [&] {
-            auto ds = m_dpu_rb.slice(dpu_rb_view.inner);
+        auto action = [&, ds] {
             auto hs = *m_dmaing_host_rb_rep.write(dpu_rb_view.inner.size());
             SPDLOG_INFO("[Resp-Rb#{}] Start dmaing[Dpu->Host: src_offset={}, dest_offset={}, size={}]",
-                m_id, hs.first_part().offset, ds.first_part().offset, ds.size());
+                m_id, ds.first_part().offset, hs.first_part().offset, ds.size());
 
             // TODO: 添加 DMA size 的最小阈值
             dpu_rb_view.status = DpuRbViewStatus::kDmaInProgress;
             m_dma->post_memcpyv(*m_dpu_mmap, *m_host_mmap,
                 make_memcpy_segs(ds, hs), 
-                [&, src_offset = hs.first_part().offset, dest_offset= ds.first_part().offset] {
+                [&, src_offset = ds.first_part().offset, dest_offset= hs.first_part().offset] {
                     SPDLOG_INFO("[Resp-Rb#{}] Finish dmaing[Dpu->Host: src_offset={}, dest_offset={}, size={}]",
                         m_id, src_offset, dest_offset, dpu_rb_view.inner.size());
                     dpu_rb_view.status = DpuRbViewStatus::kDmaDone;

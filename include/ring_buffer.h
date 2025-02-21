@@ -187,7 +187,7 @@ public:
                 return false;
             }
 
-            if (m_first_part.size() <= src.size()) {
+            if (src.size() <= m_first_part.size()) {
                 std::memcpy(m_first_part.data(), src.data(), src.size());
             } else {
                 std::memcpy(m_first_part.data(), src.data(), m_first_part.size());

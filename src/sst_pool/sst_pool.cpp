@@ -8,9 +8,8 @@
 #include <sys/stat.h>
 
 namespace pulsedb {
-SstPool::SstPool(std::string sst_dir, int base_pool_size,
-                 int big_pool_cnt, int big_pool_size,
-                 size_t file_size_base, size_t sst_pad_len)
+SstPool::SstPool(std::string sst_dir, int base_pool_size, int big_pool_cnt,
+                 int big_pool_size, size_t file_size_base, size_t sst_pad_len)
     : m_sst_dir(std::move(sst_dir)), m_base_pool_size(base_pool_size),
       m_big_pool_cnt(big_pool_cnt), m_big_pool_size(big_pool_size),
       m_file_size_base(file_size_base), m_sst_pad_len(sst_pad_len) {

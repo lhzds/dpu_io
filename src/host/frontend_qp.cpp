@@ -16,12 +16,18 @@ FrontendQp::FrontendQp(Frontend &frontend, int id,
     : m_id(id), m_req_rb(req_rb_cap), m_resp_rb(resp_rb_cap) {
     docacxx::check_derr(doca_pe_create(&m_pe), "failed to create pe");
     
-    m_req_mmap = std::make_unique<docacxx::Mmap>(frontend.dev(), m_req_rb.data(),
-        m_req_rb.cap(), DOCA_ACCESS_FLAG_PCI_READ_WRITE);
-    m_resp_mmap = std::make_unique<docacxx::Mmap>(frontend.dev(), m_resp_rb.data(),
-        m_resp_rb.cap(), DOCA_ACCESS_FLAG_PCI_READ_WRITE);
-    SPDLOG_INFO("[Frontend-Qp#{}] Create[req_rb_cap={}, resp_rb_cap={}]",
-        id, m_req_rb.cap(), m_resp_rb.cap());
+    m_req_mmap = std::make_unique<docacxx::Mmap>(
+        frontend.dev(), m_req_rb.data(), m_req_rb.cap(),
+        DOCA_ACCESS_FLAG_PCI_READ_WRITE
+    );
+    m_resp_mmap = std::make_unique<docacxx::Mmap>(
+        frontend.dev(), m_resp_rb.data(), m_resp_rb.cap(),
+        DOCA_ACCESS_FLAG_PCI_READ_WRITE
+    );
+    SPDLOG_INFO(
+        "[Frontend-Qp#{}] Create[req_rb_cap={}, resp_rb_cap={}]",
+        id, m_req_rb.cap(), m_resp_rb.cap()
+    );
 };
 
 FrontendQp::~FrontendQp() {
@@ -30,8 +36,10 @@ FrontendQp::~FrontendQp() {
 
 void FrontendQp::create_producer(Frontend &frontend) {
     size_t remote_consumer_id = frontend.recv_new_conumser_id();
-    m_producer = std::make_unique<SingleTaskProducer>(frontend.conn(), m_pe, frontend.dev(),
-        kCommRbMetaSize, remote_consumer_id);
+    m_producer = std::make_unique<SingleTaskProducer>(
+        frontend.conn(), m_pe, frontend.dev(),
+        kCommRbMetaSize, remote_consumer_id
+    );
     m_producer->start_sync();
 }
 
@@ -45,13 +53,17 @@ void FrontendQp::create_consumer(Frontend &frontend) {
 
         switch (msg->type) {
             case D2HRbMetaMsg::Type::kReqRbCleanedSize:
-                SPDLOG_INFO("[Frontend-Qp#{}] Receive meta msg[Req-Rb: cleaned_size={}]",
-                    m_id, msg->payload.req_rb_cleaned_size);
+                SPDLOG_INFO(
+                    "[Frontend-Qp#{}] Receive meta msg[ReqRbCleanedSize: cleaned_size={}]",
+                    m_id, msg->payload.req_rb_cleaned_size
+                );
                 m_req_rb_cleaned_size = msg->payload.req_rb_cleaned_size;
                 break;
             case D2HRbMetaMsg::Type::kRespRbNewSize:
-                SPDLOG_INFO("[Frontend-Qp#{}] Receive meta msg[Resp-Rb: new_size={}]",
-                    m_id, msg->payload.resp_rb_new_size);
+                SPDLOG_INFO(
+                    "[Frontend-Qp#{}] Receive meta msg[RespRbNewSize: new_size={}]",
+                    m_id, msg->payload.resp_rb_new_size
+                );
                 m_resp_rb_new_size = msg->payload.resp_rb_new_size;
                 break;
             default:
@@ -75,8 +87,10 @@ void FrontendQp::post_sync_close(size_t file_number, bool use_fsync) {
 
     m_req_rb.write(req);
     ++m_submitted_req_cnt;
-    SPDLOG_INFO("[Frontend-Qp#{}] Post request[SyncClose: file_num={}]"
-        "[Req-Rb: free_space={}]", m_id, file_number, m_req_rb.free_size());
+    SPDLOG_INFO(
+        "[Frontend-Qp#{}] Post request[SyncClose: file_num={}]"
+        "[Req-Rb: free_space={}]", m_id, file_number, m_req_rb.free_size()
+    );
     send_req_rb_new_size(req.size());
 }
 
@@ -122,11 +136,11 @@ void FrontendQp::post_write() {
     m_reserved_header_space->write({(char *)&m_cache_header, sizeof(m_cache_header)});
     ++m_submitted_req_cnt;
     m_is_prep_write = false;
-    SPDLOG_INFO("[Frontend-Qp#{}] Post request"
-        "[Write: file_num={}, offset={}, write_size={}]"
-        "[Req-Rb: free_space={}]",
-        m_id, m_cache_header.file_number,
-        m_cache_header.offset, m_cache_header.size, m_req_rb.free_size());
+    SPDLOG_INFO(
+        "[Frontend-Qp#{}] Post request[Write: file_num={}, offset={}, write_size={}]"
+        "[Req-Rb: free_space={}]", m_id, m_cache_header.file_number,
+        m_cache_header.offset, m_cache_header.size, m_req_rb.free_size()
+    );
     send_req_rb_new_size(sizeof(m_cache_header) + m_cache_header.size);
 }
 
@@ -136,6 +150,7 @@ std::vector<int> FrontendQp::wait_all() {
     size_t processed_size{};
     auto wait_req_cnt = m_submitted_req_cnt;
     while (wait_req_cnt > 0) {
+        size_t msg_offset = m_resp_rb.head();
         wait_new_resps(wait_req_cnt * sizeof(IoRespMsg), processed_size);
         processed_size = 0;
         
@@ -143,23 +158,37 @@ std::vector<int> FrontendQp::wait_all() {
             auto resp = IoRespMsg::read_from(m_resp_rb);
             switch (resp.type) {
                 case IoRespMsg::Type::kWrite:
-                    SPDLOG_INFO("[Frontend-Qp#{}] Read response[Write: file_num={}, res={}][Resp-Rb: head={}, tail={}]",
-                        m_id, resp.file_number, resp.res, m_resp_rb.head(), m_resp_rb.tail());
+                    SPDLOG_INFO(
+                        "[Frontend-Qp#{}] Read response(offset={})"
+                        "[Write: file_num={}, res={}]",
+                        m_id, msg_offset, resp.file_number, resp.res
+                    );
                     if (resp.res < 0) {
-                        throw_with("FrontendQp: Write error on {}: {}", resp.file_number, strerror(-resp.res));
+                        throw_with(
+                            "FrontendQp: Write error on {}: {}",
+                            resp.file_number, strerror(-resp.res)
+                        );
                     }
                     break;
                 case IoRespMsg::Type::kSyncClose:
-                    SPDLOG_INFO("[Frontend-Qp#{}] Read response[SyncClose: file_num={}, res={}][Resp-Rb: head={}, tail={}]",
-                        m_id, resp.file_number, resp.res, m_resp_rb.head(), m_resp_rb.tail());
+                    SPDLOG_INFO(
+                        "[Frontend-Qp#{}] Read response(offset={})"
+                        "[SyncClose: file_num={}, res={}]",
+                        m_id, msg_offset, resp.file_number, resp.res
+                    );
                     if (resp.res < 0) {
-                        throw_with("FrontendQp: Sync close error on {}: {}", resp.file_number, strerror(-resp.res));
+                        throw_with(
+                            "FrontendQp: Sync close error on {}: {}",
+                            resp.file_number, strerror(-resp.res)
+                        );
                     }
                     slot_ids.emplace_back(resp.res);
                     break;
                 default:
-                    SPDLOG_INFO("[Frontend-Qp#{}] Read response[Unexpected Type][Resp-Rb: head={}, tail={}]",
-                        m_id, m_resp_rb.head(), m_resp_rb.tail());
+                    SPDLOG_INFO(
+                        "[Frontend-Qp#{}] Read response(offset={})[Unexpected Type]",
+                        m_id, msg_offset, m_resp_rb.head(), m_resp_rb.tail()
+                    );
                     throw_with("FrontendQp: Unexpected response type");
             }
             --wait_req_cnt;
@@ -195,8 +224,11 @@ void FrontendQp::send_wait_stat(size_t wait_size, size_t processed_size) {
 
 void FrontendQp::free_req_rb_space(size_t needed_size) {
     // 提前 submit 一个 post_recv 任务，等待获取 req_rb_head
-    SPDLOG_INFO("[Frontend-Qp#{}] Send meta msg[Req-Rb: free_space={}, needed_size={}]",
-        m_id, m_req_rb.free_size(), needed_size);
+    SPDLOG_INFO(
+        "[Frontend-Qp#{}] Send meta msg"
+        "[ReqRbNeededSize: free_space={}, needed_size={}]",
+        m_id, m_req_rb.free_size(), needed_size
+    );
     m_req_rb_cleaned_size = std::nullopt;
     send_req_rb_needed_size(needed_size);
     while (not m_req_rb_cleaned_size) {
@@ -207,8 +239,11 @@ void FrontendQp::free_req_rb_space(size_t needed_size) {
 
 void FrontendQp::wait_new_resps(size_t wait_size, size_t processed_size) {
     // 提前 submit 一个 post_recv 任务，等待获取 req_rb_head
-    SPDLOG_INFO("[Frontend-Qp#{}] Send meta msg[Resp-Rb: wait_size={}, processed_size={}]",
-        m_id, wait_size, processed_size);
+    SPDLOG_INFO(
+        "[Frontend-Qp#{}] Send meta msg"
+        "[WaitStat: wait_size={}, processed_size={}]",
+        m_id, wait_size, processed_size
+    );
     m_resp_rb_new_size = std::nullopt;
     send_wait_stat(wait_size, processed_size);
     while (not m_resp_rb_new_size) {

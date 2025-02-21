@@ -8,7 +8,6 @@
 #include "constant.h"
 #include "doca_wrapper/passive_consumer.h"
 #include "doca_wrapper/queue_dma.h"
-#include "format/rb_req_resp_msg.h"
 #include "ring_buffer.h"
 #include "types.h"
 #include "util.h"
@@ -26,8 +25,10 @@ void TEST_print_resp_rb_view(const ConstBytesView &data) {
     } else {
         type_str = "Unexpected";
     }
-    std::cout << fmt::format("IoRespMsg[Type={}, file_number={}, res={}]",
-        type_str, resp->file_number, resp->res) << std::endl;;
+    std::cout << fmt::format(
+        "IoRespMsg[Type={}, file_number={}, res={}]",
+        type_str, resp->file_number, resp->res
+    ) << std::endl;;
 #endif
 }
         
@@ -56,19 +57,19 @@ RbMapping::make_memcpy_segs(RingBufferRep::Slice src, RingBufferRep::Slice dst) 
         src_first_part.shrink_forward(copy_size);
 
         // src_second_part 拷贝
-        if (src.second_part()) {
-            if (dst_first_part.size) {
-                copy_size = dst_first_part.size;
-                ret.emplace_back(src_second_part->offset, dst_first_part.offset, copy_size);
-                src_second_part->shrink_forward(copy_size);
-                dst_first_part.shrink_forward(copy_size);
-            }
-            if (dst_second_part) {
-                copy_size = src_second_part->size;
-                ret.emplace_back(src_second_part->offset, dst_second_part->offset, src_second_part->size);
-                dst_second_part->shrink_forward(copy_size);
-                src_second_part->shrink_forward(copy_size);
-            }
+        if (not src.second_part()) goto RET;
+
+        if (dst_first_part.size) {
+            copy_size = dst_first_part.size;
+            ret.emplace_back(src_second_part->offset, dst_first_part.offset, copy_size);
+            src_second_part->shrink_forward(copy_size);
+            dst_first_part.shrink_forward(copy_size);
+        }
+        if (dst_second_part) {
+            copy_size = src_second_part->size;
+            ret.emplace_back(src_second_part->offset, dst_second_part->offset, src_second_part->size);
+            dst_second_part->shrink_forward(copy_size);
+            src_second_part->shrink_forward(copy_size);
         }
     } else {
         // src_first_part 拷贝
@@ -83,13 +84,15 @@ RbMapping::make_memcpy_segs(RingBufferRep::Slice src, RingBufferRep::Slice dst) 
         dst_second_part->shrink_forward(copy_size);
 
         // src_second_part 拷贝
-        if (src.second_part()) {
-            copy_size = src_second_part->size;
-            ret.emplace_back(src_second_part->offset, dst_second_part->offset, copy_size);
-            src_second_part->shrink_forward(copy_size);
-            dst_second_part->shrink_forward(copy_size);
-        }
+        if (not src.second_part()) goto RET;
+        
+        copy_size = src_second_part->size;
+        ret.emplace_back(src_second_part->offset, dst_second_part->offset, copy_size);
+        src_second_part->shrink_forward(copy_size);
+        dst_second_part->shrink_forward(copy_size);
     }
+
+RET:
 #ifndef NDEBUG
     std::string log_entry = "[Helper] ";
     for (size_t i{}; i < ret.size(); ++i) {
@@ -118,11 +121,13 @@ DmaQpMapping::DmaQpMapping(Backend &backend, int id,
         host_req_rb_data, host_req_rb_cap, backend.dma(), std::move(req_dma_done_cb)),
     m_resp_rb_mapping(id, backend.dev(), dpu_resp_rb_cap, host_resp_mmap_desc,
         host_resp_rb_data, host_resp_rb_cap, backend.dma()) {
-    SPDLOG_INFO("[Backend] Create dma_qp_mapping"
+    SPDLOG_INFO(
+        "[Backend] Create dma_qp_mapping"
         "[id={}, dpu_req_rb_cap={}, host_req_rb_cap={}, "
         "dpu_resp_rb_cap={}, host_resp_rb_cap={}]", m_id,
         m_req_rb_mapping.dpu_rb_cap(), m_req_rb_mapping.host_rb_cap(),
-        m_resp_rb_mapping.dpu_rb_cap(), m_resp_rb_mapping.host_rb_cap());
+        m_resp_rb_mapping.dpu_rb_cap(), m_resp_rb_mapping.host_rb_cap()
+    );
 }
 
 DmaQpMapping::~DmaQpMapping() {
@@ -133,14 +138,19 @@ void DmaQpMapping::create_consumer(Backend &backend) {
     PassiveConsumer::Cfg cfg;
     cfg.post_recv_task_slot_num = 1; // 设计上同步传输，目前只需分配一个 task slot
     cfg.max_msg_size = kCommRbMetaSize;
-    m_consumer = std::make_unique<PassiveConsumer>(backend.conn(), backend.pe(), backend.pe(),
-        backend.dev(), cfg, [&](const auto &raw_msg) { recv_h2d_rb_meta_msg(raw_msg); });
+    m_consumer = std::make_unique<PassiveConsumer>(
+        backend.conn(), backend.pe(), backend.pe(),
+        backend.dev(), cfg,
+        [&](const auto &raw_msg) { recv_h2d_rb_meta_msg(raw_msg); }
+    );
 }
 
 void DmaQpMapping::create_producer(Backend &backend) {
     size_t remote_consumer_id = backend.recv_new_conumser_id();
-    m_producer = std::make_unique<SingleTaskProducer>(backend.conn(), backend.pe(), backend.dev(),
-        kCommRbMetaSize, remote_consumer_id);
+    m_producer = std::make_unique<SingleTaskProducer>(
+        backend.conn(), backend.pe(), backend.dev(),
+        kCommRbMetaSize, remote_consumer_id
+    );
     m_producer->start_sync();
 
     m_req_rb_mapping.set_producer(m_producer.get());
@@ -166,7 +176,9 @@ void DmaQpMapping::recv_h2d_rb_meta_msg(const ConstBytesView &raw_msg) {
         }
         case Type::kWaitStat: {
             auto wait_stat = msg->payload.wait_stat;
-            m_resp_rb_mapping.receive_wait_stat(wait_stat.processed_size, wait_stat.wait_size);
+            m_resp_rb_mapping.receive_wait_stat(
+                wait_stat.processed_size, wait_stat.wait_size
+            );
             break;
         }
         default:

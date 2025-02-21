@@ -49,8 +49,8 @@ constexpr size_t kOpNum = 100;
 
 TEST(FrontendTest, WriteMoreTest) {
     size_t kPageSize = std::min(size_t(1024 * 1024), kHostReqRbCap / 32);
-    size_t kWriteSize = 4 * 1024 * 1024;
-    size_t kFileCnt = 1;
+    size_t kWriteSize = 10 * 1024 * 1024;
+    size_t kFileCnt = 10;
 
     auto frontend = std::make_unique<Frontend>(kBackendName, kHostDevPci, 1, kHostReqRbCap, kHostRespRbCap);
     auto *qp = frontend->alloc_qp();

@@ -315,7 +315,7 @@ public:
 
         if (slice.second_part().has_value()) {
             auto [second_offset, second_size] = *slice.second_part();
-            std::memcpy(dst.data(), data() + second_offset, second_size);
+            std::memcpy(dst.data() + first_size, data() + second_offset, second_size);
         }
         
         return slice.size();

@@ -13,7 +13,7 @@ constexpr char kDpuDevRepPci[]{"b1:00.1"};
 
 // 容量设置较小，用于测试空间复用场景
 constexpr size_t kHostReqRbCap{32 * MB};
-constexpr size_t kHostRespRbCap{96};
+constexpr size_t kHostRespRbCap{64};
 constexpr size_t kDpuReqRbCap{kHostReqRbCap};
 constexpr size_t kDpuRespRbCap{kHostRespRbCap};
 

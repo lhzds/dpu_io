@@ -108,16 +108,16 @@ void Frontend::send_init_msg(int qp_num) {
 }
 
 void Frontend::send_init_qp_msg(int qp_id,
-    char *host_req_mem_addr, size_t host_req_mem_size,
-    char *host_resp_mem_addr, size_t host_resp_mem_size,
+    char *host_req_rb_data, size_t host_req_rb_cap,
+    char *host_resp_rb_data, size_t host_resp_rb_cap,
     const ConstBytesView &req_export_desc, const ConstBytesView &resp_export_desc) {
     auto init_qp_msg = CtrlMsg::make_init_qp_msg(qp_id, 
-        host_req_mem_addr, host_req_mem_size,
-        host_resp_mem_addr, host_resp_mem_size,
+        host_req_rb_data, host_req_rb_cap,
+        host_resp_rb_data, host_resp_rb_cap,
         req_export_desc, resp_export_desc);
     send_ctrl_msg(init_qp_msg);
-    SPDLOG_INFO("[Frontend] Send init_qp msg[qp_id={}, host_req_mem_size={}, host_resp_mem_size={}]",
-        qp_id, host_req_mem_size, host_resp_mem_size);
+    SPDLOG_INFO("[Frontend] Send init_qp msg[qp_id={}, host_req_rb_cap={}, host_resp_rb_cap={}]",
+        qp_id, host_req_rb_cap, host_resp_rb_cap);
 }
 
 void Frontend::send_exit_msg() {

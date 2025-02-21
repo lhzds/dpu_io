@@ -195,7 +195,7 @@ public:
                 return false;
             }
 
-            if (m_first_part.size() <= src.size()) {
+            if (m_first_part.size() >= src.size()) {
                 std::memcpy(m_first_part.data(), src.data(), src.size());
             } else {
                 std::memcpy(m_first_part.data(), src.data(), m_first_part.size());
@@ -323,7 +323,7 @@ public:
 
         if (slice.second_part().has_value()) {
             auto [second_offset, second_size] = *slice.second_part();
-            std::memcpy(dst.data(), data() + second_offset, second_size);
+            std::memcpy(dst.data() + first_size, data() + second_offset, second_size);
         }
         
         return slice.size();

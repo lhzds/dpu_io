@@ -19,7 +19,6 @@ SstPool::SstPool(std::string sst_dir, int base_pool_size, int big_pool_cnt,
 
   for (int pool_id{}; pool_id < pool_cnt(); ++pool_id) {
     auto [start, end] = slot_id_range_of(pool_id);
-
     for (int slot_id{start}; slot_id < end; ++slot_id) {
       m_avail_slots[pool_id].push_back(slot_id);
     }
@@ -36,7 +35,6 @@ void SstPool::create_ssts() {
   size_t file_size = 2 * m_file_size_base + m_sst_pad_len;
   for (int i{}; i < m_big_pool_cnt; ++i) {
     create_same_size_ssts(m_big_pool_size, file_size, start_id);
-
     start_id += m_big_pool_size;
     file_size += m_file_size_base;
   }

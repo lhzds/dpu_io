@@ -1,3 +1,4 @@
+set_version("1.0.0")
 add_rules("mode.debug", "mode.release")
 set_languages("c++20")
 
@@ -18,5 +19,5 @@ includes("src/host/xmake.lua")
 includes("src/dpu/xmake.lua")
 includes("src/sst_pool/xmake.lua")
 
-includes("exp/xmake.lua")
+includes("bench/xmake.lua")
 includes("test/xmake.lua")

@@ -1,3 +1,3 @@
-target("create_sst_pool")
+target("sst_pool_create")
     set_kind("binary")
-    add_files("create_sst_pool.cpp", "sst_pool.cpp")
+    add_files("sst_pool_create.cpp", "sst_pool.cpp")

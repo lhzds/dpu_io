@@ -1,15 +1,15 @@
 add_requires("gtest")
 
-target("ring_buffer_test")
+target("test_ring_buffer")
     set_kind("binary")
-    add_files("ring_buffer_test.cpp")
+    add_files("test_ring_buffer.cpp")
     add_packages("gtest")
 
-target("queue_dma_test")
+target("test_queue_dma")
     set_kind("binary")
-    add_files("queue_dma_test.cpp")
+    add_files("test_queue_dma.cpp")
     add_deps("docacxx")
     add_packages("gtest")
 
 includes("comm/xmake.lua")
-includes("producer_consumer/xmake.lua")
+includes("doca_comch/xmake.lua")

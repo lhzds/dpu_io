@@ -73,7 +73,7 @@ void FrontendQp::create_consumer(Frontend &frontend) {
 }
 
 void FrontendQp::post_sync_close(size_t file_number, bool use_fsync) {
-    if (m_is_prep_write) {
+    if (is_preping_write()) {
         throw_with("FrontendQp: Preparing write now");
     }
     auto req = IoReqMsg::make_sync_close_req(file_number, use_fsync);
@@ -95,26 +95,26 @@ void FrontendQp::post_sync_close(size_t file_number, bool use_fsync) {
 }
 
 void FrontendQp::prep_write(size_t file_number, size_t offset, int base_size_multiplier) {
-    if (m_is_prep_write) {
+    if (is_preping_write()) {
         throw_with("FrontendQp: Prepare write doubly");
     }
     IoReqMsg::init_write_req_header(m_cache_header, file_number, offset,
         base_size_multiplier);
-    size_t new_size = sizeof(m_cache_header);
-    if (m_req_rb.cap() < new_size) {
+    size_t header_size = sizeof(m_cache_header);
+    if (m_req_rb.cap() < header_size) {
         throw_with("FrontendQp: Too large to write to rb");
     }
 
-    while (m_req_rb.free_size() < new_size) {
-        free_req_rb_space(new_size);
+    while (m_req_rb.free_size() < header_size) {
+        free_req_rb_space(header_size);
    }
 
-   m_reserved_header_space = m_req_rb.reserve_space(new_size);
-   m_is_prep_write = true;
+   m_reserved_header_space = m_req_rb.reserve_space(header_size);
+   m_cur_write_req_size += header_size;
 }
 
 void FrontendQp::append(const ConstBytesView &content) {
-    if (not m_is_prep_write) {
+    if (not is_preping_write()) {
         throw_with("FrontendQp: Prepare write first");
     }
     if (m_req_rb.cap() < content.size()) {
@@ -127,21 +127,22 @@ void FrontendQp::append(const ConstBytesView &content) {
 
     m_req_rb.write(content);
     m_cache_header.size += content.size();
+    m_cur_write_req_size += content.size();
 }
 
 void FrontendQp::post_write() {
-    if (not m_is_prep_write) {
+    if (not is_preping_write()) {
         throw_with("FrontendQp: Prepare write first");
     }
     m_reserved_header_space->write({(char *)&m_cache_header, sizeof(m_cache_header)});
-    ++m_submitted_req_cnt;
-    m_is_prep_write = false;
     SPDLOG_INFO(
         "[Frontend-Qp#{}] Post request[Write: file_num={}, offset={}, write_size={}]"
         "[Req-Rb: free_space={}]", m_id, m_cache_header.file_number,
         m_cache_header.offset, m_cache_header.size, m_req_rb.free_size()
     );
     send_req_rb_new_size(sizeof(m_cache_header) + m_cache_header.size);
+    ++m_submitted_req_cnt;
+    m_cur_write_req_size = 0;
 }
 
 std::vector<int> FrontendQp::wait_all() {

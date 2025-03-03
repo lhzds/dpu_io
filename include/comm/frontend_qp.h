@@ -25,6 +25,12 @@ public:
     void create_producer(Frontend &frontend);
     void create_consumer(Frontend &frontend);
 
+    bool is_preping_write() const {
+        return m_cur_write_req_size > 0;
+    }
+    size_t cur_write_size() const {
+        return m_cur_write_req_size;
+    }
     void prep_write(size_t file_number, size_t offset, int base_size_multiplier = 1);
     void append(const ConstBytesView &content);
     void post_write();
@@ -53,7 +59,7 @@ private:
     int m_id{-1};
 
     int m_submitted_req_cnt{}; // 当前仍未完成的请求数
-    bool m_is_prep_write{};
+    size_t m_cur_write_req_size{};
     std::optional<RingBuffer::View> m_reserved_header_space;
     IoReqMsg::WriteHeader m_cache_header;
 

@@ -49,7 +49,7 @@ public:
 
     RingBufferRep() {}
     RingBufferRep(size_t cap) {
-        m_cap = std::bit_ceil(cap);
+        m_cap = std::__bit_ceil(cap);
         m_mask = m_cap - 1;
     }
 

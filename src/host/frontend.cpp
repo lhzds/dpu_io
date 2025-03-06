@@ -150,7 +150,7 @@ FrontendQp *Frontend::alloc_qp() {
     return ret;
 }
 
-void free_qp(FrontendQp *qp) {
+void Frontend::free_qp(FrontendQp *qp) {
     qp->is_busy = false;
 }
 

@@ -29,6 +29,9 @@ private:
     struct Event {
         std::function<bool()> cond;
         std::function<void()> action;
+
+        Event(std::function<bool()> cond_, std::function<void()> action_)
+            : cond(std::move(cond_)), action(std::move(action_)) {}
     };
     std::queue<Event> m_queue;
 };
@@ -37,6 +40,8 @@ private:
 struct Interval {
     size_t offset;
     size_t size;
+
+    Interval(size_t offset_, size_t size_): offset(offset_), size(size_) {}
 
     Interval shrink_forward(size_t n) {
         Interval origin = *this;

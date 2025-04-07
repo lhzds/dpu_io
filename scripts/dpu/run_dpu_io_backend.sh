@@ -1,0 +1,26 @@
+#!/bin/bash
+
+BACKEND_NAME="backend"
+DEV_PCI="03:00.1"
+DEV_REP_PCI="b1:00.1"
+
+URING_QUEUE_DEPTH=512
+DPU_REQ_RB_CAP=536870912
+DPU_RESP_RB_CAP=33554432
+
+SST_POOL_DIR="/home/olh/mnt/local/nvme3n1"
+BASE_POOL_SIZE=1500
+BIG_POOL_CNT=0
+BIG_POOL_SIZE=0
+FILE_SIZE_BASE=67108864 # 64 MB
+SST_PAD_LEN=1048576 # 1 MB
+
+export XMAKE_ROOT=y
+
+SUBPROJ_DIR=$(dirname "$(dirname "$(realpath "$(dirname "$0")")")")
+xmake build -P "$SUBPROJ_DIR" backend_run
+xmake run -P "$SUBPROJ_DIR" backend_run \
+    -n $BACKEND_NAME -r $DEV_PCI -R $DEV_REP_PCI \
+    -u $URING_QUEUE_DEPTH -a $DPU_REQ_RB_CAP -b $DPU_RESP_RB_CAP \
+    -d $SST_POOL_DIR -s $BASE_POOL_SIZE -C $BIG_POOL_CNT \
+    -S $BIG_POOL_SIZE  -b $FILE_SIZE_BASE -p $SST_PAD_LEN

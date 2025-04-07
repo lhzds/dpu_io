@@ -11,6 +11,7 @@ export XMAKE_ROOT=y
 
 SUBPROJ_DIR=$(dirname "$(dirname "$(realpath "$(dirname "$0")")")")
 xmake build -P "$SUBPROJ_DIR" sst_pool_create
-xmake run -P "$SUBPROJ_DIR" sst_pool_create -d $SST_POOL_DIR -s $BASE_POOL_SIZE -C $BIG_POOL_CNT \
+xmake run -P "$SUBPROJ_DIR" sst_pool_create \
+    -d $SST_POOL_DIR -s $BASE_POOL_SIZE -C $BIG_POOL_CNT \
     -S $BIG_POOL_SIZE  -b $FILE_SIZE_BASE -p $SST_PAD_LEN
     

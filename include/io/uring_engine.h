@@ -120,7 +120,9 @@ private:
         ctx->file_number = file_number;
 
         auto slot_id = m_sst_pool->alloc_slot(file_number, base_size_multiplier);
-        assert(slot_id.has_value());
+        if (not slot_id.has_value()) {
+            throw_with("No free slots");
+        }
         ctx->slot_id = *slot_id;
 
         auto sst_name = m_sst_pool->slot_file_name(*slot_id);

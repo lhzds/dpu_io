@@ -34,7 +34,9 @@ public:
             assert(not ret);
         });
         m_consumer->set_post_recv_error_cb([](auto task) {
-            SPDLOG_INFO("[Passive-Consumer] Release post_recv task");
+            auto s = task->status();
+            SPDLOG_INFO("[Passive-Consumer] Release post_recv task: {}[{}]",
+                doca_error_get_name(s), doca_error_get_descr(s));
         });
         m_consumer->start_sync();
         // 初始提交所有 post_recv_task
@@ -51,6 +53,7 @@ public:
     }
 
     ~PassiveConsumer() {
+        SPDLOG_INFO("[Passive-Consumer] Cleaning...");
         if (not m_consumer->is_cleaned()) {
             m_consumer->clean_sync();
         }

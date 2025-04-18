@@ -4,6 +4,7 @@
 #include <cstring>
 #include <fcntl.h>
 #include <filesystem>
+#include <spdlog/spdlog.h>
 #include <string>
 #include <sys/stat.h>
 
@@ -91,6 +92,7 @@ std::optional<int> SstPool::alloc_slot(size_t file_number,
   assert(m_slots[slot_id] == 0);
   m_slots[slot_id] = file_number;
   m_file_slot[file_number] = slot_id;
+  SPDLOG_INFO("[Sst-Pool]: Alloc a slot with id={}", slot_id);
   return slot_id;
 }
 
@@ -100,6 +102,7 @@ void SstPool::free_slot(size_t file_number) {
 
   auto [_, slot_id] = *iter;
   m_file_slot.erase(iter);
+  SPDLOG_INFO("[Sst-Pool]: Free a slot with id={}", slot_id);
 
   m_slots[slot_id] = 0;
   auto pool_id = pool_id_of(slot_id);

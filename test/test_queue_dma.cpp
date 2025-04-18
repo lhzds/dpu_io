@@ -7,7 +7,7 @@
 #include "docacxx/mem.h"
 #include "gtest/gtest.h"
 
-constexpr char kDevPciAddr[] = "b1:00.0";
+constexpr char kDevPciAddr[] = "03:00.0";
 using namespace pulsedb;
 
 class QueueDmaTest: public testing::Test {
@@ -133,25 +133,25 @@ TEST_F(QueueDmaTest, PipelineMemcpyV) {
     ASSERT_EQ(std::memcmp(src_mmap->data(), dst_mmap->data(), src_mmap->size()), 0);
 }
 
-// TEST_F(QueueDmaTest, PipelineMemcpyBlob) {
-//     size_t mem_size = dma->cap().m_max_buf_size * 2;
-//     size_t task_slot_num = 1;
+TEST_F(QueueDmaTest, PipelineMemcpyBlob) {
+    size_t task_slot_num = 1;
+    create_dma(task_slot_num);
 
-//     create_dma(task_slot_num);
-//     create_mmap(mem_size);
+    size_t mem_size = dma->cap().max_buf_size * 2;
+    create_mmap(mem_size);
 
-//     std::memset(src_mmap->data(), 66, src_mmap->size());
+    std::memset(src_mmap->data(), 66, src_mmap->size());
 
-//     bool is_finished{};
-//     dma->post_memcpy(*src_mmap, 0, *dst_mmap, 0, src_mmap->size(), [&] {
-//         is_finished = true;
-//     });
-//     while (not is_finished) {
-//         doca_pe_progress(pe);
-//     }
+    bool is_finished{};
+    dma->post_memcpy(*src_mmap, 0, *dst_mmap, 0, src_mmap->size(), [&] {
+        is_finished = true;
+    });
+    while (not is_finished) {
+        doca_pe_progress(pe);
+    }
     
-//     ASSERT_EQ(std::memcmp(src_mmap->data(), dst_mmap->data(), src_mmap->size()), 0);
-// }
+    ASSERT_EQ(std::memcmp(src_mmap->data(), dst_mmap->data(), src_mmap->size()), 0);
+}
 
 int main(int argc, char** argv) {
     testing::InitGoogleTest(&argc, argv);

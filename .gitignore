@@ -11,3 +11,4 @@ packages/
 
 deps/output/
 
+scripts/dpu/run_log

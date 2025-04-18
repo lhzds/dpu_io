@@ -39,11 +39,11 @@ void read_args(int argc, char **argv) {
         .help("uring queue depth")
         .required()
         .scan<'d', size_t>();
-    arg_parser.add_argument("-a")
+    arg_parser.add_argument("-x")
         .help("dpu req rb cap")
         .required()
         .scan<'d', size_t>();
-    arg_parser.add_argument("-b")
+    arg_parser.add_argument("-y")
         .help("dev resp rb cap")
         .required()
         .scan<'d', size_t>();   
@@ -79,8 +79,8 @@ void read_args(int argc, char **argv) {
     dev_rep_pci = arg_parser.get<std::string>("-R");
 
     uring_queue_depth = arg_parser.get<size_t>("-u");
-    dpu_req_rb_cap = arg_parser.get<size_t>("-a");
-    dpu_resp_rb_cap = arg_parser.get<size_t>("-b");
+    dpu_req_rb_cap = arg_parser.get<size_t>("-x");
+    dpu_resp_rb_cap = arg_parser.get<size_t>("-y");
 
     sst_pool_dir = arg_parser.get<std::string>("-d");
     base_pool_size = arg_parser.get<size_t>("-s");
@@ -113,11 +113,14 @@ void read_args(int argc, char **argv) {
 }
 
 int main(int argc, char **argv) {
+    read_args(argc, argv);
+
     auto sst_pool = std::make_unique<SstPool>(
         sst_pool_dir, base_pool_size,
         big_pool_cnt, big_pool_size,
         file_size_base, sst_pad_len
     );
+    SPDLOG_INFO("[DPU] Dpu-io backend running...");
     auto uring_ctx = std::make_unique<UringEngine>(uring_queue_depth, std::move(sst_pool));
     Backend backend(backend_name, dev_pci, dev_rep_pci,
         std::move(uring_ctx), dpu_req_rb_cap, dpu_resp_rb_cap);

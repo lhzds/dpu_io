@@ -39,15 +39,15 @@ public:
                 auto [part_offset, part_size] = part_iter.next();
                 m_memcpy_ctx.submit([&, size, shared_cb, src_offset, dst_offset, part_offset, part_size] {
                     auto src = m_buf_inv.get_buf(src_mmap, src_offset + part_offset, part_size).release();
-                    src->set_doca_buf_data(size);
+                    src->set_doca_buf_data(part_size);
                     auto dst = m_buf_inv.get_buf(dst_mmap, dst_offset + part_offset, part_size).release();
 
                     auto task = alloc_memcpy_task(*src, *dst, [src, dst, shared_cb](const MemcpyTask &) {
+                        delete src;
+                        delete dst;
                         if (shared_cb.use_count() == 1) {
                             shared_cb->operator()();
                         }
-                        delete src;
-                        delete dst;
                     });
                     submit(std::move(task));
                 });
@@ -60,7 +60,7 @@ public:
             auto src = m_buf_inv.get_buf(src_mmap, src_offset, size).release();
             src->set_doca_buf_data(size);
             auto dst = m_buf_inv.get_buf(dst_mmap, dst_offset, size).release();
-            auto task = alloc_memcpy_task(*src, *dst, [=, cb = std::move(cb)](const MemcpyTask &) {
+            auto task = alloc_memcpy_task(*src, *dst, [src, dst, cb = std::move(cb)](const MemcpyTask &) {
                 delete src;
                 delete dst;
                 cb();

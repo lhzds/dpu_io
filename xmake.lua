@@ -2,6 +2,12 @@ set_version("1.0.0")
 add_rules("mode.debug", "mode.release")
 set_languages("c++20")
 
+if is_mode("releasedbg") then
+    set_symbols("debug")
+    set_optimize("faster")
+    add_cxxflags("-fno-omit-frame-pointer")
+end
+
 if not is_mode("debug") then
     add_defines("SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_OFF")
 end

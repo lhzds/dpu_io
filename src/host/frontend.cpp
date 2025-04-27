@@ -136,6 +136,9 @@ size_t Frontend::recv_new_conumser_id() {
 }
 
 FrontendQp *Frontend::alloc_qp() {
+#ifndef NDEBUG
+    std::cout << "Try alloc a qp" << std::endl;
+#endif
     FrontendQp *ret{};
     while (ret == nullptr) {
       bool test = false;
@@ -147,11 +150,17 @@ FrontendQp *Frontend::alloc_qp() {
         m_start_alloc_idx = 0;
       }
     }
+#ifndef NDEBUG
+    std::cout << "Alloc Qp with id = " << ret->id() << std::endl;
+#endif
     return ret;
 }
 
 void Frontend::free_qp(FrontendQp *qp) {
     qp->is_busy = false;
+    #ifndef NDEBUG
+        std::cout << "Free Qp with id = " << qp->id() << std::endl;
+    #endif
 }
 
 } // namespace pulsedb

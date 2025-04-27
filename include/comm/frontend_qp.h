@@ -4,7 +4,7 @@
 
 #include "bytes.h"
 #include "doca_wrapper/passive_consumer.h"
-#include "doca_wrapper/single_task_producer.h"
+#include "doca_wrapper/producers.h"
 #include "docacxx/mem.h"
 #include "format/rb_req_resp_msg.h"
 #include "frontend.h"
@@ -37,7 +37,9 @@ public:
 
     void post_sync_close(size_t file_number, bool use_fsync);
 
-    std::vector<int> wait_all();
+    std::vector<std::pair<int, int>> wait_all();
+
+    int id() const { return m_id; }
 
     RingBuffer &req_rb_ref() { return m_req_rb; }
     docacxx::Mmap &req_mmap_ref() { return *m_req_mmap; }
@@ -67,7 +69,7 @@ private:
     RingBuffer m_resp_rb;
     std::unique_ptr<docacxx::Mmap> m_req_mmap;
     std::unique_ptr<docacxx::Mmap> m_resp_mmap;
-    std::unique_ptr<SingleTaskProducer> m_producer;
+    std::unique_ptr<SyncSingleTaskProducer> m_producer;
 
     std::optional<size_t> m_req_rb_cleaned_size{};
     std::optional<size_t> m_resp_rb_new_size{};

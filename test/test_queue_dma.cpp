@@ -3,6 +3,7 @@
 #include <doca_error.h>
 #include <memory>
 
+#include "constant.h"
 #include "doca_wrapper/queue_dma.h"
 #include "docacxx/mem.h"
 #include "gtest/gtest.h"
@@ -137,7 +138,7 @@ TEST_F(QueueDmaTest, PipelineMemcpyBlob) {
     size_t task_slot_num = 1;
     create_dma(task_slot_num);
 
-    size_t mem_size = dma->cap().max_buf_size * 2;
+    size_t mem_size = std::max(dma->cap().max_buf_size * 2, 64 * MB);
     create_mmap(mem_size);
 
     std::memset(src_mmap->data(), 66, src_mmap->size());

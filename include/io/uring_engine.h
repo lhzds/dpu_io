@@ -15,7 +15,7 @@
 
 namespace pulsedb {
 
-// public 为前台线程接口
+// public 为前台线程接口，参考 doca pe 设计，非线程安全
 class UringEngine: public IoEngine {
 public:
     UringEngine(uint32_t queue_depth, std::unique_ptr<SstPool> sst_pool)
@@ -62,10 +62,12 @@ public:
         assert(iter != m_writing_files.end()); // write 必然已被提交
         FileCtx *ctx = iter->second.get();
 
-        ctx->sync_close_req.reset(new FileCtx::SyncCloseArg{use_fsync, cb});
+        auto &sync_close_ctx = ctx->sync_close_ctx;
+        sync_close_ctx.is_valid = true;
+        sync_close_ctx.use_fsync = use_fsync;
+        sync_close_ctx.cb = cb;
         try_issue_sync_close(ctx);
     }
-
 
     bool query() override {
         IoData *io_data{};
@@ -78,15 +80,21 @@ public:
         if (io_data->op == Op::kWrite) {
             --ctx->write_cnt;
             try_issue_sync_close(ctx);
+            if (io_data->cb != nullptr) {
+                io_data->cb->operator()(file_number, io_data->res);
+            }
         } else if (io_data->op == Op::kSyncClose) {
-            io_data->res = ctx->slot_id;
-            m_writing_files.erase(file_number);
+            // sync 和 close 完成顺序不固定，最后一个完成的调用生成回复
+            auto &sync_close_ctx = io_data->ctx->sync_close_ctx;
+            if ((++sync_close_ctx.seen_cqe_cnt) == 2) {
+                io_data->res = ctx->slot_id;
+                m_writing_files.erase(file_number);
+                if (sync_close_ctx.cb != nullptr) {
+                    sync_close_ctx.cb->operator()(file_number, io_data->res);
+                }
+            }
         } else {
             throw_with("UringEngine: Unexpected op type");
-        }
-
-        if (io_data->cb != nullptr) {
-            io_data->cb->operator()(file_number, io_data->res);
         }
 
         delete io_data;
@@ -95,15 +103,16 @@ public:
 
 private:    
     struct FileCtx{
-        struct SyncCloseArg {
-            bool use_fsync{};
-            CallbackFn *cb{};
-        };
         size_t file_number{}; // 从 1 开始
         int slot_id{-1}; // 从 0 开始
         int os_fd{-1};
         int write_cnt{};
-        std::unique_ptr<SyncCloseArg> sync_close_req{};
+        struct SyncCloseCtx {
+            bool is_valid{};
+            int seen_cqe_cnt{};
+            bool use_fsync{};
+            CallbackFn *cb{};
+        } sync_close_ctx{};
     };
     struct IoData {
         Op op;
@@ -136,19 +145,6 @@ private:
         return iter->second.get();
     }
 
-    void try_issue_sync_close(FileCtx *ctx) {
-        if (ctx->write_cnt == 0 && ctx->sync_close_req != nullptr) {
-            SPDLOG_INFO("[Io-Engine] Issue request[SyncClose: file_number={}]",
-                ctx->file_number);
-            auto &arg = *(ctx->sync_close_req);
-            auto *io_data = new IoData;
-            io_data->op = Op::kSyncClose;
-            io_data->ctx = ctx;
-            io_data->cb = arg.cb;
-            issue_sync_close(ctx->os_fd, arg.use_fsync, io_data);
-        }
-    }
-
     void issue_write(int fd, size_t offset, const RingBuffer::View &src, IoData *io_data) {
         io_uring_sqe *sqe = io_uring_get_sqe(m_uring);
         if (sqe == nullptr) {
@@ -172,24 +168,40 @@ private:
         m_uring_cqe_cnt.fetch_add(1);
     }
 
-    void issue_sync_close(int fd, bool use_fsync, IoData *io_data) {
-        io_uring_sqe *sqe1 = io_uring_get_sqe(m_uring);
-        if (sqe1 == nullptr) {
-            throw_with("UringEngine: Failed to get sqe1: {}", strerror(errno));
+    void try_issue_sync_close(FileCtx *ctx) {
+        if (ctx->write_cnt == 0 && ctx->sync_close_ctx.is_valid) {
+            SPDLOG_INFO("[Io-Engine] Issue request[SyncClose: file_number={}]",
+                ctx->file_number);
+            auto *sync_data = new IoData;
+            sync_data->op = Op::kSyncClose;
+            sync_data->ctx = ctx;
+            auto *close_data = new IoData;
+            close_data->op = Op::kSyncClose;
+            close_data->ctx = ctx;
+            issue_sync_close(ctx->os_fd, ctx->sync_close_ctx.use_fsync,
+                sync_data, close_data);
         }
-        io_uring_sqe_set_flags(sqe1, IOSQE_IO_LINK);
-        if (use_fsync) {
-            io_uring_prep_fsync(sqe1, fd, 0);
-        } else {
-            io_uring_prep_fsync(sqe1, fd, IORING_FSYNC_DATASYNC);
-        }
+    }
 
-        io_uring_sqe *sqe2 = io_uring_get_sqe(m_uring);
-        if (sqe2 == nullptr) {
-            throw_with("UringEngine: Failed to get sqe2: {}", strerror(errno));
+    void issue_sync_close(int fd, bool use_fsync, IoData *sync_data, IoData *close_data) {
+        io_uring_sqe *sync_sqe = io_uring_get_sqe(m_uring);
+        if (sync_sqe == nullptr) {
+            throw_with("UringEngine: Failed to get sync sqe: {}", strerror(errno));
         }
-        io_uring_prep_close(sqe2, fd);
-        sqe2->user_data = reinterpret_cast<uint64_t>(io_data);
+        io_uring_sqe_set_flags(sync_sqe, IOSQE_IO_LINK);
+        if (use_fsync) {
+            io_uring_prep_fsync(sync_sqe, fd, 0);
+        } else {
+            io_uring_prep_fsync(sync_sqe, fd, IORING_FSYNC_DATASYNC);
+        }
+        sync_sqe->user_data = reinterpret_cast<uint64_t>(sync_data);
+
+        io_uring_sqe *close_sqe = io_uring_get_sqe(m_uring);
+        if (close_sqe == nullptr) {
+            throw_with("UringEngine: Failed to get close sqe: {}", strerror(errno));
+        }
+        io_uring_prep_close(close_sqe, fd);
+        close_sqe->user_data = reinterpret_cast<uint64_t>(close_data);
 
         if (auto ret = io_uring_submit(m_uring); ret < 0) {
             throw_with("UringEngine: Failed to submit uring: {}", strerror(errno));
@@ -218,7 +230,6 @@ private:
             io_uring_cqe_seen(m_uring, cqe);
             m_uring_cqe_cnt.fetch_add(-1);
 
-            if (io_data == nullptr) continue;
             io_data->res = res;
             while (not m_cq.push(io_data)) {
                 std::this_thread::yield();

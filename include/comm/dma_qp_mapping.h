@@ -6,7 +6,7 @@
 #include "bytes.h"
 #include "docacxx/mem.h"
 #include "doca_wrapper/queue_dma.h"
-#include "doca_wrapper/single_task_producer.h"
+#include "doca_wrapper/producers.h"
 #include "doca_wrapper/passive_consumer.h"
 #include "format/rb_meta_msg.h"
 #include "format/rb_req_resp_msg.h"
@@ -46,7 +46,7 @@ public:
         return m_dpu_rb.cap();
     }
 
-    void set_producer(SingleTaskProducer *producer) {
+    void set_producer(QueueSingleTaskProducer *producer) {
         m_producer = producer;
     }
     static std::vector<QueueDma::MemcpySeg> make_memcpy_segs(RingBufferRep::Slice src,
@@ -61,7 +61,7 @@ protected:
     std::unique_ptr<docacxx::Mmap> m_host_mmap; // 远程内存
 
     QueueDma *m_dma{};
-    SingleTaskProducer *m_producer{};
+    QueueSingleTaskProducer *m_producer{};
 };
 
 class ReqRbMapping: public RbMapping {
@@ -84,13 +84,16 @@ public:
         : RbMapping(id, dev, dpu_rb_cap, host_mmap_desc,
             host_rb_data, host_rb_cap, dma), m_dma_done_cb(std::move(cb)) {}
 
-    void read_async(size_t size) {
+    void read_async(size_t data_size) {
         SPDLOG_INFO("[Req-Rb#{}] Receive meta msg[NewSize: new_size={}, dpu_rb_free_size={}]",
-            m_id, size, m_dpu_rb.free_size());
-        auto hs = *m_host_rb_rep.write(size);
+            m_id, data_size, m_dpu_rb.free_size());
+        auto hs = *m_host_rb_rep.write(data_size);
         // 用于判断 dpu_req_rb 是否有空间，否则放入等待队列
-        auto cond = [&, expected_size = size]() -> bool { 
-            return m_dpu_rb.free_size() >= expected_size;
+        if (m_dpu_rb.cap() < data_size) {
+            throw_with("Req-Rb#{}: Too large to write", m_id);
+        }
+        auto cond = [&, data_size]() -> bool {
+            return m_dpu_rb.free_size() >= data_size;
         };
         // 用于将 req 插入 req 环形队列
         auto action = [&, hs] {
@@ -166,11 +169,12 @@ private:
             m_id, m_host_needed_size, m_host_cleaned_size);
         if (m_host_cleaned_size >= m_host_needed_size) {
             // 大端/小端字节序？
-            auto *d2h_rb_meta_msg = (D2HRbMetaMsg *)m_producer->buf_data();
+            BytesBuffer data(sizeof(D2HRbMetaMsg));
+            auto *d2h_rb_meta_msg = (D2HRbMetaMsg *)data.data();
             d2h_rb_meta_msg->type = D2HRbMetaMsg::Type::kReqRbCleanedSize;
             d2h_rb_meta_msg->payload.req_rb_cleaned_size = m_host_cleaned_size;
-            auto ret = m_producer->try_submit_send_task(sizeof(*d2h_rb_meta_msg));
-            assert(ret);
+            // host 已经提前发出 post_recv 任务
+            m_producer->submit_send_task(std::move(data));
             SPDLOG_INFO("[Req-Rb#{}] Send meta msg[cleaned_size={}]", m_id, m_host_cleaned_size);
             
             m_host_rb_rep.read(m_host_cleaned_size);
@@ -206,8 +210,11 @@ public:
         SPDLOG_INFO("[Resp-Rb#{}] Try to append data to dpu rb[data_size={}, dpu_rb_head={},"
                     "dpu_rb_tail={}, dpu_rb_free_size={}]",
                     m_id, data.size(), m_dpu_rb.head(), m_dpu_rb.tail(), m_dpu_rb.free_size());
-        auto cond = [&, expected_size=data.size()] {
-            return m_dpu_rb.free_size() >= expected_size;
+        if (m_dpu_rb.cap() < data.size()) {
+            throw_with("Resp-Rb#{}: Too large to write", m_id);
+        }
+        auto cond = [&, data_size=data.size()] {
+            return m_dpu_rb.free_size() >= data_size;
         };
         auto action = [&, d = std::move(data)] {
             auto dpu_rb_view = *m_dpu_rb.reserve_space(d.size());
@@ -233,16 +240,20 @@ public:
 
 private:
     void start_dma(DpuRbView &dpu_rb_view) {
+        auto data_size = dpu_rb_view.inner.size();
         auto ds = m_dpu_rb.slice(dpu_rb_view.inner);
         SPDLOG_INFO("[Resp-Rb#{}] Append data, try to start dmaing[Dpu->Host: src_offset={}, "
             "data_size={}, host_rb_free_size={}]",
-            m_id, ds.first_part().offset, dpu_rb_view.inner.size(),
+            m_id, ds.first_part().offset, data_size,
             m_dmaing_host_rb_rep.free_size());
-        auto cond = [&, expected_size = dpu_rb_view.inner.size()]() -> bool {
-            return m_dmaing_host_rb_rep.free_size() >= expected_size;
+        if (m_dmaing_host_rb_rep.cap() < data_size) {
+            throw_with("Host-Resp-Rb#{}: To large to write", m_id);
+        }
+        auto cond = [&, data_size]() -> bool {
+            return m_dmaing_host_rb_rep.free_size() >= data_size;
         };
-        auto action = [&, ds] {
-            auto hs = *m_dmaing_host_rb_rep.write(dpu_rb_view.inner.size());
+        auto action = [&, ds, data_size] {
+            auto hs = *m_dmaing_host_rb_rep.write(data_size);
             SPDLOG_INFO("[Resp-Rb#{}] Start dmaing[Dpu->Host: src_offset={}, dest_offset={}, size={}]",
                 m_id, ds.first_part().offset, hs.first_part().offset, ds.size());
 
@@ -262,7 +273,7 @@ private:
                         }
                         new_size += iter->inner.size();
                     }
-                    SPDLOG_INFO("[Req-Rb#{}] Get the new space for (dpu rb to reclaim / host rb to read)[size={}]",
+                    SPDLOG_INFO("[Resp-Rb#{}] Get the new space for (dpu rb to reclaim / host rb to read)[size={}]",
                         m_id, new_size);
                     m_host_new_size += new_size;
                     m_dpu_rb.read(new_size);
@@ -280,14 +291,15 @@ private:
         }
         size_t host_rb_free_size = m_host_rb_rep.free_size() / sizeof(IoRespMsg) * sizeof(IoRespMsg);
         size_t target = std::min(host_rb_free_size, m_host_wait_size);
-        SPDLOG_INFO("[Req-Rb#{}] Try send meta msg[target={}, new_size={}]",
+        SPDLOG_INFO("[Resp-Rb#{}] Try send meta msg[target={}, new_size={}]",
             m_id, target, m_host_new_size);
         if (m_host_new_size >= target) {
-            auto *d2h_rb_meta_msg = (D2HRbMetaMsg *)m_producer->buf_data();
+            BytesBuffer data(sizeof(D2HRbMetaMsg));
+            auto *d2h_rb_meta_msg = (D2HRbMetaMsg *)data.data();
             d2h_rb_meta_msg->type = D2HRbMetaMsg::Type::kRespRbNewSize;
             d2h_rb_meta_msg->payload.resp_rb_new_size = target;
-            auto ret = m_producer->try_submit_send_task(sizeof(*d2h_rb_meta_msg));
-            assert(ret);
+            // host 已经提前发出 post_recv 任务
+            m_producer->submit_send_task(std::move(data));
             SPDLOG_INFO("[Resp-Rb#{}] Send meta msg[new_size={}]", m_id, target);
 
             m_host_rb_rep.write(target);
@@ -332,7 +344,7 @@ private:
     RespRbMapping m_resp_rb_mapping;
 
     std::unique_ptr<PassiveConsumer> m_consumer;
-    std::unique_ptr<SingleTaskProducer> m_producer;
+    std::unique_ptr<QueueSingleTaskProducer> m_producer;
 };
 
 } // namespace pulsedb

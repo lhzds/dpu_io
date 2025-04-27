@@ -1,6 +1,6 @@
 #include "config.h"
 #include "docacxx/ctx/server.h"
-#include "doca_wrapper/single_task_producer.h"
+#include "doca_wrapper/producers.h"
 #include "scoped_guard.h"
 #include <doca_pe.h>
 #include <optional>
@@ -47,7 +47,7 @@ int main() {
     while (not remote_consumer_id) {
         doca_pe_progress(pe);
     }
-    SingleTaskProducer producer(conn, pe, dev, 1024, *remote_consumer_id);
+    SyncSingleTaskProducer producer(conn, pe, dev, 1024, *remote_consumer_id);
     producer.start_sync();
 
     std::string msg = "hello, world!";

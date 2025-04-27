@@ -36,7 +36,7 @@ FrontendQp::~FrontendQp() {
 
 void FrontendQp::create_producer(Frontend &frontend) {
     size_t remote_consumer_id = frontend.recv_new_conumser_id();
-    m_producer = std::make_unique<SingleTaskProducer>(
+    m_producer = std::make_unique<SyncSingleTaskProducer>(
         frontend.conn(), m_pe, frontend.dev(),
         kCommRbMetaSize, remote_consumer_id
     );
@@ -78,11 +78,11 @@ void FrontendQp::post_sync_close(size_t file_number, bool use_fsync) {
     }
     auto req = IoReqMsg::make_sync_close_req(file_number, use_fsync);
     if (m_req_rb.cap() < req.size()) {
-        throw_with("FrontendQp: Too large to write to rb");
+        throw_with("FrontendQp: Too large to write");
     }
 
     while (m_req_rb.free_size() < req.size()) {
-        free_req_rb_space(req.size());
+        free_req_rb_space(req.size() - m_req_rb.free_size());
     }
 
     m_req_rb.write(req);
@@ -102,11 +102,11 @@ void FrontendQp::prep_write(size_t file_number, size_t offset, int base_size_mul
         base_size_multiplier);
     size_t header_size = sizeof(m_cache_header);
     if (m_req_rb.cap() < header_size) {
-        throw_with("FrontendQp: Too large to write to rb");
+        throw_with("FrontendQp: Too large to write");
     }
 
     while (m_req_rb.free_size() < header_size) {
-        free_req_rb_space(header_size);
+        free_req_rb_space(header_size - m_req_rb.free_size());
    }
 
    m_reserved_header_space = m_req_rb.reserve_space(header_size);
@@ -118,11 +118,11 @@ void FrontendQp::append(const ConstBytesView &content) {
         throw_with("FrontendQp: Prepare write first");
     }
     if (m_req_rb.cap() < content.size()) {
-        throw_with("FrontendQp: Too large to write to rb");
+        throw_with("FrontendQp: Too large to write");
     }
 
     while (m_req_rb.free_size() < content.size()) {
-        free_req_rb_space(content.size());
+        free_req_rb_space(content.size() - m_req_rb.free_size());
     }
 
     m_req_rb.write(content);
@@ -145,8 +145,8 @@ void FrontendQp::post_write() {
     m_cur_write_req_size = 0;
 }
 
-std::vector<int> FrontendQp::wait_all() {
-    std::vector<int> slot_ids;
+std::vector<std::pair<int, int>> FrontendQp::wait_all() {
+    std::vector<std::pair<int, int>> file_map;
 
     size_t processed_size{};
     auto wait_req_cnt = m_submitted_req_cnt;
@@ -183,7 +183,7 @@ std::vector<int> FrontendQp::wait_all() {
                             resp.file_number, strerror(-resp.res)
                         );
                     }
-                    slot_ids.emplace_back(resp.res);
+                    file_map.emplace_back(resp.file_number, resp.res);
                     break;
                 default:
                     SPDLOG_INFO(
@@ -194,11 +194,12 @@ std::vector<int> FrontendQp::wait_all() {
             }
             --wait_req_cnt;
             processed_size += sizeof(IoRespMsg);
+            msg_offset += sizeof(IoRespMsg);
         }
     }
 
     m_submitted_req_cnt = 0;
-    return slot_ids;
+    return file_map;
 }
 
 void FrontendQp::send_req_rb_new_size(size_t new_size) {

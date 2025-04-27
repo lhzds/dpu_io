@@ -92,7 +92,8 @@ std::optional<int> SstPool::alloc_slot(size_t file_number,
   assert(m_slots[slot_id] == 0);
   m_slots[slot_id] = file_number;
   m_file_slot[file_number] = slot_id;
-  SPDLOG_INFO("[Sst-Pool]: Alloc a slot with id={}", slot_id);
+  SPDLOG_INFO("[Sst-Pool]: Alloc a slot[id={}] -> file[num={}] from pool[id={}]",
+    slot_id, file_number, pool_id);
   return slot_id;
 }
 

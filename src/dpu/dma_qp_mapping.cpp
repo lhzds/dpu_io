@@ -147,7 +147,7 @@ void DmaQpMapping::create_consumer(Backend &backend) {
 
 void DmaQpMapping::create_producer(Backend &backend) {
     size_t remote_consumer_id = backend.recv_new_conumser_id();
-    m_producer = std::make_unique<SingleTaskProducer>(
+    m_producer = std::make_unique<QueueSingleTaskProducer>(
         backend.conn(), backend.pe(), backend.dev(),
         kCommRbMetaSize, remote_consumer_id
     );

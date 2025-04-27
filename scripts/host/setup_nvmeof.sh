@@ -3,7 +3,7 @@
 PORT_NAME=1
 NAMESPACE_NAME=1
 
-NVME_DEV="/dev/nvme3n1" # 供远程使用的设备
+NVME_DEV="/dev/nvme2n1" # 供远程使用的设备
 SUBSYSTEM_NAME="test"
 PORT_NUM="4420" # 端口号
 IP_ADDR="192.168.1.20" # IB 网卡地址

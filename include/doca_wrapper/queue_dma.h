@@ -11,6 +11,7 @@
 #include "docacxx/mem.h"
 #include "docacxx/task_context.hpp"
 #include "part_iterator.h"
+#include "util.h"
 
 namespace pulsedb {
 class QueueDma: public docacxx::Dma {
@@ -23,7 +24,7 @@ public:
     };
 
     QueueDma(doca_pe *pe, doca_dev *dev, size_t memcpy_task_slot_num)
-        :m_pe(pe), Dma(pe, dev, Cfg{memcpy_task_slot_num}),
+        :Dma(pe, dev, Cfg{memcpy_task_slot_num}),
         m_buf_inv(dev, 2 * memcpy_task_slot_num), m_memcpy_ctx(memcpy_task_slot_num) {
         set_memcpy_cb(m_memcpy_ctx.make_pipeline_submitter());
     }
@@ -49,7 +50,10 @@ public:
                             shared_cb->operator()();
                         }
                     });
-                    submit(std::move(task));
+                    auto ret = submit(std::move(task));
+                    if (ret != nullptr) {
+                        pulsedb::throw_with("QueueDma: Submit failed");
+                    }
                 });
             }
 
@@ -65,7 +69,10 @@ public:
                 delete dst;
                 cb();
             });
-            submit(std::move(task));
+            auto ret = submit(std::move(task));
+            if (ret != nullptr) {
+                throw_with("QueueDma: Submit failed");
+            }
         });
     }
 
@@ -83,10 +90,12 @@ public:
     }
 
 private:
+    using Dma::Cfg;
     using Dma::alloc_memcpy_task;
     using Dma::submit;
+    using Dma::set_memcpy_cb;
+    using Dma::set_memcpy_error_cb;
 
-    doca_pe *m_pe;
     docacxx::BufInventory m_buf_inv;
     docacxx::TaskContext<MemcpyTask> m_memcpy_ctx;
 };

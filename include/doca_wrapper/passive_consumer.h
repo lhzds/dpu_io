@@ -31,7 +31,9 @@ public:
             }
             
             auto ret = m_consumer->submit(std::move(task));
-            assert(not ret);
+            if (ret != nullptr) {
+                throw_with("PassiveConsumer: ReSubmit failed");
+            }
         });
         m_consumer->set_post_recv_error_cb([](auto task) {
             auto s = task->status();
@@ -44,7 +46,9 @@ public:
             m_bufs.emplace_back(m_buf_inv->get_buf(i * cfg.max_msg_size, cfg.max_msg_size));
             auto task = m_consumer->alloc_post_recv_task(*m_bufs.back(), nullptr);
             auto ret = m_consumer->submit(std::move(task));
-            assert(not ret);
+            if (ret != nullptr) {
+                throw_with("PassiveConsumer: Submit failed");
+            }
         }
     }
 

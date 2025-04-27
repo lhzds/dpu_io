@@ -1,10 +1,25 @@
-#! /bin/bash
+#!/bin/bash
 
-DEV_PATH=/dev/nvme3n1
-MNT_POINT=/home/olh/mnt/local/$(basename $DEV_PATH)
+DEV1=/dev/nvme2n1p1
+MNT1=/home/olh/mnt/local/db
 
-sudo umount "$MNT_POINT"
-sudo wipefs $DEV_PATH
-sudo mkfs.ext4 $DEV_PATH
-sudo mount $DEV_PATH "$MNT_POINT"
-sudo chmod 777 "$MNT_POINT"
+DEV2=/dev/nvme2n1p2
+MNT2=/home/olh/mnt/local/sst_pool
+
+mkdir -p "$MNT1"
+mkdir -p "$MNT2"
+
+sudo umount "$MNT1"
+sudo umount "$MNT2"
+
+sudo wipefs "$DEV1"
+sudo wipefs "$DEV2"
+
+sudo mkfs.ext4 "$DEV1"
+sudo mkfs.ext4 "$DEV2"
+
+sudo mount "$DEV1" "$MNT1"
+sudo mount "$DEV2" "$MNT2"
+
+sudo chmod 777 "$MNT1"
+sudo chmod 777 "$MNT2"

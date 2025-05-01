@@ -197,6 +197,9 @@ std::vector<std::pair<int, int>> FrontendQp::wait_all() {
             msg_offset += sizeof(IoRespMsg);
         }
     }
+    if (processed_size > 0) {
+        send_wait_stat(0, processed_size);
+    }
 
     m_submitted_req_cnt = 0;
     return file_map;

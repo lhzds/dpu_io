@@ -101,6 +101,10 @@ public:
         return true;
     }
 
+    void delete_file(size_t file_number) override {
+        m_sst_pool->free_slot(file_number);
+    }
+
 private:    
     struct FileCtx{
         size_t file_number{}; // 从 1 开始

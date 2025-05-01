@@ -20,6 +20,7 @@ public:
         CallbackFn *cb = nullptr) = 0;
     virtual void sync_close_async(size_t file_number, bool use_fsync, CallbackFn *cb = nullptr) = 0;
     virtual bool query() = 0;
+    virtual void delete_file(size_t file_number);
 };
 
 } // namespace pulsedb

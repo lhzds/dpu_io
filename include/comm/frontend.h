@@ -18,19 +18,10 @@ public:
         int qp_num, size_t req_rb_cap, size_t resp_rb_cap);
     ~Frontend();
 
-    void send_init_msg(int qp_num);
-    void send_init_qp_msg(int qp_id,
-        char *host_req_mem_addr, size_t host_req_mem_size,
-        char *host_resp_mem_addr, size_t host_resp_mem_size,
-        const ConstBytesView &req_export_desc, const ConstBytesView &resp_export_desc);
-    void send_exit_msg();
-
-    template<class CtrlMsgTypeRef> CtrlMsgTypeRef recv_ctrl_msg();
-    size_t recv_new_conumser_id(); 
-
     FrontendQp *alloc_qp();
     void free_qp(FrontendQp *qp);
-
+    void delete_file(size_t file_number);
+    size_t recv_new_conumser_id(); 
 
     doca_dev *dev() { return m_dev; }
     doca_pe *pe() { return m_pe; }
@@ -38,6 +29,20 @@ public:
 
 private:
     void send_ctrl_msg(ConstBytesView raw_msg);
+    void send_init_msg(int qp_num);
+    void send_init_qp_msg(
+        int qp_id,
+        char *host_req_mem_addr, size_t host_req_mem_size,
+        char *host_resp_mem_addr, size_t host_resp_mem_size,
+        const ConstBytesView &req_export_desc,
+        const ConstBytesView &resp_export_desc
+    );
+    void send_exit_msg();
+    void send_delete_file_msg(size_t file_number);
+
+    template<class CtrlMsgTypeRef> CtrlMsgTypeRef recv_ctrl_msg();
+    void recv_ack_msg() { recv_ctrl_msg<CtrlMsg::AckMsgRef>(); }
+    void recv_start_comm_msg() { recv_ctrl_msg<CtrlMsg::StartCommMsgRef>(); }
 
     doca_dev *m_dev{};
     doca_pe *m_pe{};

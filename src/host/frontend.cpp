@@ -7,6 +7,7 @@
 
 #include "bytes.h"
 #include "comm/frontend.h"
+#include "format/ctrl_msg.h"
 
 namespace pulsedb {
 Frontend::Frontend(const std::string_view &backend_name, const std::string_view &dev_pci,
@@ -34,7 +35,7 @@ Frontend::Frontend(const std::string_view &backend_name, const std::string_view 
     m_conn = m_ctrl_client->get_connection();
 
     send_init_msg(qp_num);
-    recv_ctrl_msg<CtrlMsg::AckMsgRef>();
+    recv_ack_msg();
 
     m_qps.reserve(qp_num);
     for (int i{}; i < qp_num; ++i) {
@@ -44,13 +45,13 @@ Frontend::Frontend(const std::string_view &backend_name, const std::string_view 
         send_init_qp_msg(i, qp.req_rb_ref().data(), qp.req_rb_ref().cap(),
             qp.resp_rb_ref().data(), qp.resp_rb_ref().cap(),
             qp.req_mmap_ref().export_pci(m_dev), qp.resp_mmap_ref().export_pci(m_dev));
-        recv_ctrl_msg<CtrlMsg::AckMsgRef>();
+        recv_ack_msg();
 
         qp.create_producer(*this);
         qp.create_consumer(*this);
     }
     SPDLOG_INFO("[Frontend] Create {} qps", qp_num);
-    recv_ctrl_msg<CtrlMsg::StartCommMsgRef>();
+    recv_start_comm_msg();
 }
 
 Frontend::~Frontend() {
@@ -67,6 +68,11 @@ Frontend::~Frontend() {
     }
 }
 
+void Frontend::delete_file(size_t file_number) {
+    send_delete_file_msg(file_number);
+    recv_ack_msg();
+}
+
 template<class CtrlMsgRefType>
 CtrlMsgRefType Frontend::recv_ctrl_msg() {
     while (not m_ctrl_msg_ref_var) {
@@ -77,14 +83,10 @@ CtrlMsgRefType Frontend::recv_ctrl_msg() {
     m_ctrl_msg_ref_var = std::nullopt;
     if constexpr (std::is_same_v<CtrlMsgRefType, CtrlMsg::AckMsgRef>) {
         SPDLOG_INFO("[Frontend] Receive ack msg");
-    } else if constexpr (std::is_same_v<CtrlMsgRefType, CtrlMsg::InitMsgRef>) {
-        SPDLOG_INFO("[Frontend] Receive init msg");
-    } else if constexpr (std::is_same_v<CtrlMsgRefType, CtrlMsg::InitQpMsgRef>) {
-        SPDLOG_INFO("[Frontend] Receive init_qp msg");
-    } else if constexpr (std::is_same_v<CtrlMsgRefType, CtrlMsg::ExitMsgRef>) {
-        SPDLOG_INFO("[Frontend] Receive exit msg");
     } else if constexpr (std::is_same_v<CtrlMsgRefType, CtrlMsg::StartCommMsgRef>) {
         SPDLOG_INFO("[Frontend] Receive start_comm msg");
+    } else {
+        throw_with("Frontend: Unexpected msg type");
     }
     return ret;
 }
@@ -123,6 +125,11 @@ void Frontend::send_init_qp_msg(int qp_id,
 void Frontend::send_exit_msg() {
     send_ctrl_msg(CtrlMsg::make_exit_msg());
     SPDLOG_INFO("[Frontend] Send exit msg");
+}
+
+void Frontend::send_delete_file_msg(size_t file_number) {
+    send_ctrl_msg(CtrlMsg::make_delete_file_msg(file_number));
+    SPDLOG_INFO("[Frontend] Send delete file msg");
 }
 
 size_t Frontend::recv_new_conumser_id() {

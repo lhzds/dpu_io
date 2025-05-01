@@ -93,11 +93,27 @@ Backend::Backend(const std::string_view &name, const std::string_view &dev_pci,
             *m_ctrl_msg_variant
         );
 
-        if (msg_type != CtrlMsg::Type::kExit) {
-            throw_with("Backend: Unexpected ctrl msg type");
+        switch (msg_type) {
+            case CtrlMsg::Type::kDeleteFile: {
+                auto ref = std::get<CtrlMsg::DeleteFileMsgRef>(*m_ctrl_msg_variant);
+                size_t file_number = ref.header->file_number;
+
+                SPDLOG_INFO("[Backend] Receive delete_file msg[file_number={}]", file_number);
+
+                m_io_ctx->delete_file(file_number);
+                send_ack_msg();
+                break;
+            }
+            case CtrlMsg::Type::kExit: {
+                SPDLOG_INFO("[Backend] Receive exit msg");
+                m_is_exited = true;
+                break;
+            }
+            default: {
+                throw_with("Backend: Unexpected ctrl msg type");
+                break;
+            }
         }
-        SPDLOG_INFO("[Backend] Receive exit msg");
-        m_is_exited = true;
     });
     send_start_comm_msg();
 }
@@ -137,16 +153,12 @@ CtrlMsgType Backend::recv_ctrl_msg() {
 
     auto ret = std::get<CtrlMsgType>(*m_ctrl_msg_variant);
     m_ctrl_msg_variant = std::nullopt;
-    if constexpr (std::is_same_v<CtrlMsgType, CtrlMsg::AckMsgRef>) {
-        SPDLOG_INFO("[Backend] Receive ack msg");
-    } else if constexpr (std::is_same_v<CtrlMsgType, CtrlMsg::InitMsgRef>) {
+    if constexpr (std::is_same_v<CtrlMsgType, CtrlMsg::InitMsgRef>) {
         SPDLOG_INFO("[Backend] Receive init msg");
     } else if constexpr (std::is_same_v<CtrlMsgType, CtrlMsg::InitQpMsgRef>) {
         SPDLOG_INFO("[Backend] Receive init_qp msg");
-    } else if constexpr (std::is_same_v<CtrlMsgType, CtrlMsg::ExitMsgRef>) {
-        SPDLOG_INFO("[Backend] Receive exit msg");
-    } else if constexpr (std::is_same_v<CtrlMsgType, CtrlMsg::StartCommMsgRef>) {
-        SPDLOG_INFO("[Backend] Receive start_comm msg");
+    } else {
+        throw_with("Backend: Unexpected msg type");
     }
     return ret;
 }

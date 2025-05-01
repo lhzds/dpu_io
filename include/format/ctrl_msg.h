@@ -16,6 +16,7 @@ struct CtrlMsg {
         kInit,
         kINitQp,
         kStartComm,
+        kDeleteFile,
         kExit,
         kAck
     };
@@ -38,6 +39,9 @@ struct CtrlMsg {
         size_t host_resp_mmap_desc_size{};
     };
     struct StartCommHeader: CommonHeader {};
+    struct DeleteFileHeader: CommonHeader {
+        size_t file_number;
+    };
     struct ExitHeader: CommonHeader {};
     struct AckHeader: CommonHeader {};
 
@@ -52,13 +56,23 @@ struct CtrlMsg {
     struct StartCommMsgRef {
         StartCommHeader *header{};
     };
+    struct DeleteFileMsgRef {
+        DeleteFileHeader *header{};
+    };
     struct ExitMsgRef {
         ExitHeader *header{};
     };
     struct AckMsgRef {
         AckHeader *header{};
     };
-    using RefVariant = std::variant<InitMsgRef, InitQpMsgRef, StartCommMsgRef, ExitMsgRef, AckMsgRef>;
+    using RefVariant = std::variant<
+        InitMsgRef,
+        InitQpMsgRef,
+        StartCommMsgRef,
+        DeleteFileMsgRef,
+        ExitMsgRef,
+        AckMsgRef
+    >;
 
     static BytesBuffer make_init_msg(int qp_num) {
         BytesBuffer buf(sizeof(InitHeader));
@@ -99,6 +113,14 @@ struct CtrlMsg {
         BytesBuffer buf(sizeof(StartCommHeader));
         auto *header = (StartCommHeader *)buf.data();
         header->type = Type::kStartComm;
+        return buf;
+    }
+
+    static BytesBuffer make_delete_file_msg(size_t file_number) {
+        BytesBuffer buf(sizeof(DeleteFileHeader));
+        auto *header = (DeleteFileHeader *)buf.data();
+        header->type = Type::kDeleteFile;
+        header->file_number = file_number;
         return buf;
     }
 
@@ -160,6 +182,14 @@ struct CtrlMsg {
                 StartCommMsgRef start_comm_msg;
                 start_comm_msg.header = (StartCommHeader *)src.data();
                 return start_comm_msg;
+            }
+            case Type::kDeleteFile: {
+                if (src.size() < sizeof(DeleteFileHeader)) {
+                    throw_with("DeleteFileMsg: Wrong delete_file msg size");
+                }
+                DeleteFileMsgRef delete_file_msg;
+                delete_file_msg.header = (DeleteFileHeader *)src.data();
+                return delete_file_msg;
             }      
             case Type::kExit: {
                 if (src.size() < sizeof(ExitHeader)) {

@@ -293,7 +293,7 @@ private:
         size_t target = std::min(host_rb_free_size, m_host_wait_size);
         SPDLOG_INFO("[Resp-Rb#{}] Try send meta msg[target={}, new_size={}]",
             m_id, target, m_host_new_size);
-        if (m_host_new_size >= target) {
+        if (target > 0 && m_host_new_size >= target) {
             BytesBuffer data(sizeof(D2HRbMetaMsg));
             auto *d2h_rb_meta_msg = (D2HRbMetaMsg *)data.data();
             d2h_rb_meta_msg->type = D2HRbMetaMsg::Type::kRespRbNewSize;

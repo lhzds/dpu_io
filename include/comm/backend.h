@@ -27,10 +27,6 @@ public:
 
     void run();
 
-    void send_start_comm_msg();
-    void send_ack_msg();
-    void send_exit_msg();
-    template<class CtrlMsgType> CtrlMsgType recv_ctrl_msg();
     size_t recv_new_conumser_id();
 
     doca_dev *dev() const { return m_dev; }
@@ -41,6 +37,11 @@ public:
 
 private:
     void send_ctrl_msg(const ConstBytesView &raw_msg);
+    void send_start_comm_msg();
+    void send_ack_msg();
+    void send_exit_msg();
+
+    template<class CtrlMsgType> CtrlMsgType recv_ctrl_msg();
 
     void submit_request_to_io_engine(int qp_id, ReqRbMapping::DpuRbView &req_view);
 

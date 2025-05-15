@@ -20,7 +20,7 @@ public:
 
     FrontendQp *alloc_qp();
     void free_qp(FrontendQp *qp);
-    void delete_file(size_t file_number);
+    void delete_files(const std::vector<size_t> &file_nums);
     size_t recv_new_conumser_id(); 
 
     doca_dev *dev() { return m_dev; }
@@ -38,7 +38,7 @@ private:
         const ConstBytesView &resp_export_desc
     );
     void send_exit_msg();
-    void send_delete_file_msg(size_t file_number);
+    void send_delete_file_msg(const std::vector<size_t> &file_nums);
 
     template<class CtrlMsgTypeRef> CtrlMsgTypeRef recv_ctrl_msg();
     void recv_ack_msg() { recv_ctrl_msg<CtrlMsg::AckMsgRef>(); }
@@ -56,5 +56,7 @@ private:
     bool m_is_ctrl_msg_sended{};
     std::optional<CtrlMsg::RefVariant> m_ctrl_msg_ref_var{};
     std::optional<size_t> m_new_consumer_id{};
+
+    std::mutex m_mu;
 };
 }

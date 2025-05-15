@@ -60,7 +60,7 @@ private:
     doca_pe *m_pe{};
     int m_id{-1};
 
-    int m_submitted_req_cnt{}; // 当前仍未完成的请求数
+    int m_sync_close_cnt{}; // 当前仍未完成的请求数
     size_t m_cur_write_req_size{};
     std::optional<RingBuffer::View> m_reserved_header_space;
     IoReqMsg::WriteHeader m_cache_header;

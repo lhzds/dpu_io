@@ -186,9 +186,13 @@ void DmaQpMapping::recv_h2d_rb_meta_msg(const ConstBytesView &raw_msg) {
     }
 }
 
-void DmaQpMapping::finish_req(ReqRbMapping::DpuRbView &req_view, BytesBuffer data) {
+void DmaQpMapping::finish_req(ReqRbMapping::DpuRbView &req_view) {
     m_req_rb_mapping.invalid_dpu_view(req_view);
-    m_resp_rb_mapping.append(std::move(data));
+}
+
+void DmaQpMapping::finish_req(ReqRbMapping::DpuRbView &req_view, BytesBuffer resp_data) {
+    m_req_rb_mapping.invalid_dpu_view(req_view);
+    m_resp_rb_mapping.append(std::move(resp_data));
 }
 
 } // namespace pulsedb

@@ -333,7 +333,8 @@ public:
     void create_consumer(Backend &backend);
     void create_producer(Backend &backend);
 
-    void finish_req(ReqRbMapping::DpuRbView &m_req_view, BytesBuffer data);
+    void finish_req(ReqRbMapping::DpuRbView &m_req_view);
+    void finish_req(ReqRbMapping::DpuRbView &m_req_view, BytesBuffer resp_data);
 
 private:
     void recv_h2d_rb_meta_msg(const ConstBytesView &raw_msg);

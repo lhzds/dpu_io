@@ -86,7 +86,7 @@ void FrontendQp::post_sync_close(size_t file_number, bool use_fsync) {
     }
 
     m_req_rb.write(req);
-    ++m_submitted_req_cnt;
+    ++m_sync_close_cnt;
     SPDLOG_INFO(
         "[Frontend-Qp#{}] Post request[SyncClose: file_num={}]"
         "[Req-Rb: free_space={}]", m_id, file_number, m_req_rb.free_size()
@@ -141,7 +141,6 @@ void FrontendQp::post_write() {
         m_cache_header.offset, m_cache_header.size, m_req_rb.free_size()
     );
     send_req_rb_new_size(sizeof(m_cache_header) + m_cache_header.size);
-    ++m_submitted_req_cnt;
     m_cur_write_req_size = 0;
 }
 
@@ -149,7 +148,7 @@ std::vector<std::pair<int, int>> FrontendQp::wait_all() {
     std::vector<std::pair<int, int>> file_map;
 
     size_t processed_size{};
-    auto wait_req_cnt = m_submitted_req_cnt;
+    auto wait_req_cnt = m_sync_close_cnt;
     while (wait_req_cnt > 0) {
         size_t msg_offset = m_resp_rb.head();
         wait_new_resps(wait_req_cnt * sizeof(IoRespMsg), processed_size);
@@ -158,19 +157,19 @@ std::vector<std::pair<int, int>> FrontendQp::wait_all() {
         while (m_resp_rb.size() > 0) {
             auto resp = IoRespMsg::read_from(m_resp_rb);
             switch (resp.type) {
-                case IoRespMsg::Type::kWrite:
-                    SPDLOG_INFO(
-                        "[Frontend-Qp#{}] Read response(offset={})"
-                        "[Write: file_num={}, res={}]",
-                        m_id, msg_offset, resp.file_number, resp.res
-                    );
-                    if (resp.res < 0) {
-                        throw_with(
-                            "FrontendQp: Write error on {}: {}",
-                            resp.file_number, strerror(-resp.res)
-                        );
-                    }
-                    break;
+                // case IoRespMsg::Type::kWrite:
+                //     SPDLOG_INFO(
+                //         "[Frontend-Qp#{}] Read response(offset={})"
+                //         "[Write: file_num={}, res={}]",
+                //         m_id, msg_offset, resp.file_number, resp.res
+                //     );
+                //     if (resp.res < 0) {
+                //         throw_with(
+                //             "FrontendQp: Write error on {}: {}",
+                //             resp.file_number, strerror(-resp.res)
+                //         );
+                //     }
+                //     break;
                 case IoRespMsg::Type::kSyncClose:
                     SPDLOG_INFO(
                         "[Frontend-Qp#{}] Read response(offset={})"
@@ -201,7 +200,7 @@ std::vector<std::pair<int, int>> FrontendQp::wait_all() {
         send_wait_stat(0, processed_size);
     }
 
-    m_submitted_req_cnt = 0;
+    m_sync_close_cnt = 0;
     return file_map;
 }
 

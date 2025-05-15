@@ -5,6 +5,7 @@ set_languages("c++20")
 if is_mode("releasedbg") then
     set_symbols("debug")
     set_optimize("faster")
+    add_defines("NDEBUG")
     add_cxxflags("-fno-omit-frame-pointer")
 end
 

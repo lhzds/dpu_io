@@ -40,7 +40,7 @@ struct CtrlMsg {
     };
     struct StartCommHeader: CommonHeader {};
     struct DeleteFileHeader: CommonHeader {
-        size_t file_number;
+        int vlen;
     };
     struct ExitHeader: CommonHeader {};
     struct AckHeader: CommonHeader {};
@@ -58,6 +58,7 @@ struct CtrlMsg {
     };
     struct DeleteFileMsgRef {
         DeleteFileHeader *header{};
+        size_t *file_nums;
     };
     struct ExitMsgRef {
         ExitHeader *header{};
@@ -116,11 +117,17 @@ struct CtrlMsg {
         return buf;
     }
 
-    static BytesBuffer make_delete_file_msg(size_t file_number) {
-        BytesBuffer buf(sizeof(DeleteFileHeader));
-        auto *header = (DeleteFileHeader *)buf.data();
+    static BytesBuffer make_delete_file_msg(const std::vector<size_t> &file_nums) {
+        BytesBuffer buf(sizeof(DeleteFileHeader) + file_nums.size() * sizeof(size_t));
+        BytesView dst(buf);
+
+        auto *header = (DeleteFileHeader *)dst.data();
         header->type = Type::kDeleteFile;
-        header->file_number = file_number;
+        header->vlen = file_nums.size();
+        dst = dst.subspan(sizeof(DeleteFileHeader));
+
+        std::memcpy(dst.data(), file_nums.data(), file_nums.size() * sizeof(size_t));
+
         return buf;
     }
 
@@ -189,6 +196,12 @@ struct CtrlMsg {
                 }
                 DeleteFileMsgRef delete_file_msg;
                 delete_file_msg.header = (DeleteFileHeader *)src.data();
+                src = src.subspan(sizeof(DeleteFileHeader));
+
+                if (src.size() < delete_file_msg.header->vlen * sizeof(size_t)) {
+                    throw_with("DeleteFileMsg: Wrong delete_file msg size");
+                }
+                delete_file_msg.file_nums = (size_t *)src.data();
                 return delete_file_msg;
             }      
             case Type::kExit: {

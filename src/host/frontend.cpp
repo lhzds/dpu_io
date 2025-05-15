@@ -68,9 +68,9 @@ Frontend::~Frontend() {
     }
 }
 
-void Frontend::delete_file(size_t file_number) {
-    send_delete_file_msg(file_number);
-    recv_ack_msg();
+void Frontend::delete_files(const std::vector<size_t> &file_nums) {
+    std::unique_lock lock(m_mu);
+    send_delete_file_msg(file_nums);
 }
 
 template<class CtrlMsgRefType>
@@ -127,8 +127,8 @@ void Frontend::send_exit_msg() {
     SPDLOG_INFO("[Frontend] Send exit msg");
 }
 
-void Frontend::send_delete_file_msg(size_t file_number) {
-    send_ctrl_msg(CtrlMsg::make_delete_file_msg(file_number));
+void Frontend::send_delete_file_msg(const std::vector<size_t> &file_nums) {
+    send_ctrl_msg(CtrlMsg::make_delete_file_msg(file_nums));
     SPDLOG_INFO("[Frontend] Send delete file msg");
 }
 
@@ -165,9 +165,9 @@ FrontendQp *Frontend::alloc_qp() {
 
 void Frontend::free_qp(FrontendQp *qp) {
     qp->is_busy = false;
-    #ifndef NDEBUG
-        std::cout << "Free Qp with id = " << qp->id() << std::endl;
-    #endif
+#ifndef NDEBUG
+    std::cout << "Free Qp with id = " << qp->id() << std::endl;
+#endif
 }
 
 } // namespace pulsedb

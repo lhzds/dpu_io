@@ -14,5 +14,6 @@ echo -n > /sys/kernel/config/nvmet/ports/$PORT_NAME/addr_traddr
 echo -n > /sys/kernel/config/nvmet/ports/$PORT_NAME/addr_trtype
 echo -n > /sys/kernel/config/nvmet/ports/$PORT_NAME/addr_adrfam
 rmdir --ignore-fail-on-non-empty /sys/kernel/config/nvmet/ports/$PORT_NAME
+
 rmmod nvmet_rdma
 rmmod nvmet

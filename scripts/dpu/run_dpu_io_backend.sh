@@ -1,6 +1,6 @@
 #!/bin/bash
 
-MODE=releasedbg
+MODE=release
 
 BACKEND_NAME="backend"
 DEV_PCI="03:00.1"
@@ -23,7 +23,7 @@ SUBPROJ_DIR=$(dirname "$(dirname "$(realpath "$(dirname "$0")")")")
 
 xmake f -P "$SUBPROJ_DIR" -m $MODE
 xmake build -P "$SUBPROJ_DIR" backend_run
-xmake run -d -P "$SUBPROJ_DIR" backend_run \
+xmake run -P "$SUBPROJ_DIR" backend_run \
     -n $BACKEND_NAME -r $DEV_PCI -R $DEV_REP_PCI \
     -u $URING_QUEUE_DEPTH -x $DPU_REQ_RB_CAP -y $DPU_RESP_RB_CAP \
     -d $SST_POOL_DIR -s $BASE_POOL_SIZE -C $BIG_POOL_CNT \

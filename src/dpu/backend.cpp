@@ -95,13 +95,13 @@ Backend::Backend(const std::string_view &name, const std::string_view &dev_pci,
 
         switch (msg_type) {
             case CtrlMsg::Type::kDeleteFile: {
+                SPDLOG_INFO("[Backend] Receive delete_file msg");
+
                 auto ref = std::get<CtrlMsg::DeleteFileMsgRef>(*m_ctrl_msg_variant);
-                size_t file_number = ref.header->file_number;
-
-                SPDLOG_INFO("[Backend] Receive delete_file msg[file_number={}]", file_number);
-
-                m_io_ctx->delete_file(file_number);
-                send_ack_msg();
+                int vlen = ref.header->vlen;
+                for (int i{}; i < vlen; ++i) {
+                    m_io_ctx->delete_file(ref.file_nums[i]);
+                }
                 break;
             }
             case CtrlMsg::Type::kExit: {
@@ -221,8 +221,9 @@ void Backend::submit_request_to_io_engine(int qp_id, ReqRbMapping::DpuRbView &re
                         "[Write: file_number={}, offset={}, size={}]",
                         qp_id, file_number, offset, size
                     );
-                    auto msg = IoRespMsg::make(IoRespMsg::Type::kWrite, file_number, res);
-                    m_qps[qp_id]->finish_req(req_view, std::move(msg));
+                    // auto msg = IoRespMsg::make(IoRespMsg::Type::kWrite, file_number, res);
+                    // m_qps[qp_id]->finish_req(req_view, std::move(msg));
+                    m_qps[qp_id]->finish_req(req_view);
             });
             m_io_ctx->write_async(header.file_number, header.offset, 
                 header.base_size_multiplier, *write_ref->content, cb);

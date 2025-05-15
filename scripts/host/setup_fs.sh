@@ -1,9 +1,9 @@
 #!/bin/bash
 
-DEV1=/dev/nvme2n1p1
+DEV1=/dev/nvme3n1p1
 MNT1=/home/olh/mnt/local/db
 
-DEV2=/dev/nvme2n1p2
+DEV2=/dev/nvme3n1p2
 MNT2=/home/olh/mnt/local/sst_pool
 
 mkdir -p "$MNT1"

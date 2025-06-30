@@ -14,8 +14,8 @@ if not is_mode("debug") then
 end
 add_defines("SPDLOG_FMT_EXTERNAL")
 
-add_requires("fmt 9.1.0", "spdlog", "boost", "argparse")
-add_packages("fmt", "spdlog", "boost", "argparse")
+add_requires("fmt 9.1.0", "spdlog 1.12.0", "boost", "argparse")
+add_packages("spdlog", "fmt", "boost", "argparse")
 
 add_ldflags("-luring")
 

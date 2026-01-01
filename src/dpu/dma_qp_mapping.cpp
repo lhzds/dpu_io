@@ -20,6 +20,8 @@ void TEST_print_resp_rb_view(const ConstBytesView &data) {
     std::string type_str;
     if (resp->type == IoRespMsg::Type::kWrite) {
         type_str = "Write";
+    } else if (resp->type == IoRespMsg::Type::kRangeSync) {
+        type_str = "RangeSync";
     } else if (resp->type == IoRespMsg::Type::kSyncClose) {
         type_str = "SyncClose";
     } else {

@@ -170,6 +170,19 @@ std::vector<std::pair<int, int>> FrontendQp::wait_all() {
                 //         );
                 //     }
                 //     break;
+                // case IoRespMsg::Type::kRangeSync:
+                //     SPDLOG_INFO(
+                //         "[Frontend-Qp#{}] Read response(offset={})"
+                //         "[RangeSync: file_num={}, res={}]",
+                //         m_id, msg_offset, resp.file_number, resp.res
+                //     );
+                //     if (resp.res < 0) {
+                //         throw_with(
+                //             "FrontendQp: Range sync error on {}: {}",
+                //             resp.file_number, strerror(-resp.res)
+                //         );
+                //     }
+                //     break;
                 case IoRespMsg::Type::kSyncClose:
                     SPDLOG_INFO(
                         "[Frontend-Qp#{}] Read response(offset={})"

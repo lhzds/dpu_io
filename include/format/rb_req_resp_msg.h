@@ -50,20 +50,38 @@ struct IoReqMsg {
         size_t offset;
         size_t size;
     };
+    struct RangeSyncHeader: CommonHeader {
+        size_t offset;
+        size_t size;
+        bool wait_before;
+    };
     struct SyncCloseHeader: CommonHeader {
         bool use_fsync;
     };
 
     // 如果内存不连续，那么将完整拷贝一份到堆中
     // (Write Request 要写入的数据，这部分将调用 writev 接口向量化写入)
-    struct WriteMsgRbRef: public Noncopyable  {
-        WriteHeader *header{};
-        std::optional<RingBuffer::View> content;
-        ~WriteMsgRbRef() {
+    template<typename HeaderType>
+    struct MsgRbRef: public Noncopyable {
+        HeaderType *header{};
+        ~MsgRbRef() {
             if (m_owner_flag & 1) {
                 delete header;
             }
         }
+
+        size_t size() const {
+            return sizeof(HeaderType);
+        }
+
+        void be_header_owner() {
+            m_owner_flag &= 1;
+        }
+    private:
+        uint8_t m_owner_flag{}; // 1: header
+    };
+    struct WriteMsgRbRef: public MsgRbRef<WriteHeader>  {
+        std::optional<RingBuffer::View> content;
 
         size_t size() const {
             auto ret = sizeof(WriteHeader);
@@ -72,36 +90,16 @@ struct IoReqMsg {
             }
             return ret;
         }
-
-        void be_header_owner() {
-            m_owner_flag &= 1;
-        }
-
-    private:
-        uint8_t m_owner_flag{}; // 1: header
     };
-    struct SyncCloseMsgRbRef: public Noncopyable  {
-        SyncCloseHeader *header{};
-        ~SyncCloseMsgRbRef() {
-            if (m_owner_flag & 1) {
-                delete header;
-            }
-        }
-
-        size_t size() const {
-            return sizeof(SyncCloseHeader);
-        }
-
-        void be_header_owner() {
-            m_owner_flag &= 1;
-        }
-
-    private:
-        uint8_t m_owner_flag{}; // 1: header
-    };
+    using RangeSyncMsgRbRef = MsgRbRef<RangeSyncHeader>;
+    using SyncCloseMsgRbRef = MsgRbRef<SyncCloseHeader>;
 
     // 引入所有权机制，只有不需要时才进行析构
-    using RefVariant = std::variant<std::unique_ptr<SyncCloseMsgRbRef>, std::unique_ptr<WriteMsgRbRef>>;
+    using RefVariant = std::variant<
+        std::unique_ptr<SyncCloseMsgRbRef>,
+        std::unique_ptr<WriteMsgRbRef>,
+        std::unique_ptr<RangeSyncMsgRbRef>
+    >;
     template<typename ReqType>
     static std::unique_ptr<ReqType> get_req_ptr(RefVariant& variant) {
         return std::move(std::get<std::unique_ptr<ReqType>>(variant));
@@ -113,6 +111,17 @@ struct IoReqMsg {
         header.offset = offset;
         header.size = 0;
         header.base_size_multiplier = base_size_multiplier;
+    }
+
+    static BytesBuffer make_range_sync_req(size_t file_number, size_t offset, size_t size, bool wait_before) {
+        BytesBuffer req(sizeof(RangeSyncHeader));
+        auto *header = (RangeSyncHeader *)req.data();
+        header->type = Type::kRangeSync;
+        header->file_number = file_number;
+        header->offset = offset;
+        header->size = size;
+        header->wait_before = wait_before;
+        return req;
     }
 
     static BytesBuffer make_sync_close_req(size_t file_number, bool use_fsync) {
@@ -136,6 +145,11 @@ struct IoReqMsg {
                 auto req = std::make_unique<WriteMsgRbRef>();
                 ref_or_copy_req_header(src, *req);
                 req->content = src.cut(req->header->size);
+                return req;
+            }
+            case Type::kRangeSync: {
+                auto req = std::make_unique<RangeSyncMsgRbRef>();
+                ref_or_copy_req_header(src, *req);
                 return req;
             }
             case Type::kSyncClose: {

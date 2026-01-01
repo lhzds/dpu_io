@@ -229,6 +229,29 @@ void Backend::submit_request_to_io_engine(int qp_id, ReqRbMapping::DpuRbView &re
                 header.base_size_multiplier, *write_ref->content, cb);
             break;
         }
+        case IoReqMsg::Type::kRangeSync: {
+            auto range_sync_ref = IoReqMsg::get_req_ptr<IoReqMsg::RangeSyncMsgRbRef>(ref_var);
+            auto &header = *range_sync_ref->header;
+            SPDLOG_INFO(
+                "[Backend] Submit request from qp_id={} to I/O engine"
+                "[RangeSync: file_number={}, offset={}, size={}]",
+                qp_id, header.file_number, header.offset, header.size
+            );
+
+            auto *cb = IoEngine::CallbackFn::make(
+                [&, qp_id, offset=header.offset, size=header.size]
+                (size_t file_number, int res) {
+                    SPDLOG_INFO(
+                        "[Backend] Complete request from qp_id={}"
+                        "[RangeSync: file_number={}, offset={}, size={}]",
+                        qp_id, file_number, offset, size
+                    );
+                    m_qps[qp_id]->finish_req(req_view);
+            });
+            m_io_ctx->range_sync_async(header.file_number, header.offset,
+                header.size, header.wait_before, cb);
+            break;
+        }
         case IoReqMsg::Type::kSyncClose: {
             auto sync_close_ref = IoReqMsg::get_req_ptr<IoReqMsg::SyncCloseMsgRbRef>(ref_var);
             auto &header = *sync_close_ref->header;

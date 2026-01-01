@@ -1,6 +1,7 @@
 #pragma once
 
 #include <bits/types/struct_iovec.h>
+#include <cstddef>
 #include <cstring>
 #include <fcntl.h>
 #include <iostream>
@@ -44,7 +45,7 @@ public:
         FileCtx *ctx{};
         auto iter = m_writing_files.find(file_number);
         if (iter == m_writing_files.end()) {
-            ctx = init_write_ctx(file_number, base_size_multiplier);
+            ctx = init_file_ctx(file_number, base_size_multiplier);
         } else {
             ctx = iter->second.get();
         }
@@ -57,9 +58,23 @@ public:
         issue_write(ctx->os_fd, offset, src, io_data);
     }
 
+    void range_sync_async(size_t file_number, size_t offset, size_t size,
+        bool wait_before, CallbackFn *cb) override {
+        auto iter = m_writing_files.find(file_number);
+        assert(iter != m_writing_files.end()); // write 最先提交，ctx 必然已被创建
+        FileCtx *ctx = iter->second.get();
+
+        ++ctx->range_sync_cnt;
+        auto *io_data = new IoData;
+        io_data->op = Op::kRangeSync;
+        io_data->ctx = ctx;
+        io_data->cb = cb;
+        issue_range_sync(ctx->os_fd, offset, size, wait_before, io_data);
+    }
+
     void sync_close_async(size_t file_number, bool use_fsync, CallbackFn *cb) override {
         auto iter = m_writing_files.find(file_number);
-        assert(iter != m_writing_files.end()); // write 必然已被提交
+        assert(iter != m_writing_files.end()); // write 最先提交，ctx 必然已被创建
         FileCtx *ctx = iter->second.get();
 
         auto &sync_close_ctx = ctx->sync_close_ctx;
@@ -79,6 +94,12 @@ public:
         int file_number = ctx->file_number;
         if (io_data->op == Op::kWrite) {
             --ctx->write_cnt;
+            try_issue_sync_close(ctx);
+            if (io_data->cb != nullptr) {
+                io_data->cb->operator()(file_number, io_data->res);
+            }
+        } else if (io_data->op == Op::kRangeSync) {
+            --ctx->range_sync_cnt;
             try_issue_sync_close(ctx);
             if (io_data->cb != nullptr) {
                 io_data->cb->operator()(file_number, io_data->res);
@@ -111,6 +132,12 @@ private:
         int slot_id{-1}; // 从 0 开始
         int os_fd{-1};
         int write_cnt{};
+        int range_sync_cnt{};
+
+        int in_flight_ops() const {
+            return write_cnt + range_sync_cnt;
+        }
+
         struct SyncCloseCtx {
             bool is_valid{};
             int seen_cqe_cnt{};
@@ -128,7 +155,7 @@ private:
     using CompleteQueue = boost::lockfree::spsc_queue<IoData *,
         boost::lockfree::capacity<kIoEngineCqDepth>>;
 
-    FileCtx *init_write_ctx(size_t file_number, int base_size_multiplier) {
+    FileCtx *init_file_ctx(size_t file_number, int base_size_multiplier) {
         auto ctx = std::make_unique<FileCtx>();
         ctx->file_number = file_number;
 
@@ -152,7 +179,7 @@ private:
     void issue_write(int fd, size_t offset, const RingBuffer::View &src, IoData *io_data) {
         io_uring_sqe *sqe = io_uring_get_sqe(m_uring);
         if (sqe == nullptr) {
-            throw_with("UringEngine: Failed to get sqe: {}", strerror(errno));
+            throw_with("UringEngine: Failed to get write sqe: {}", strerror(errno));
         }
 
         io_data->iovs[0].iov_base = src.first_part().data();
@@ -167,13 +194,35 @@ private:
         sqe->user_data = reinterpret_cast<uint64_t>(io_data);
         
         if (auto ret = io_uring_submit(m_uring); ret < 0) {
-            throw_with("UringEngine: Failed to submit: {}", strerror(errno));
+            throw_with("UringEngine: Failed to submit write: {}", strerror(errno));
+        }
+        m_uring_cqe_cnt.fetch_add(1);
+    }
+
+    void issue_range_sync(int fd, size_t offset, size_t size,
+                          bool wait_before, IoData *io_data) {
+        io_uring_sqe *sqe = io_uring_get_sqe(m_uring);
+        if (sqe == nullptr) {
+            throw_with("UringEngine: Failed to get range sync sqe: {}", strerror(errno));
+        }
+
+        if (wait_before) {
+            io_uring_prep_sync_file_range(sqe, fd, size + offset, 0,
+                SYNC_FILE_RANGE_WAIT_BEFORE | SYNC_FILE_RANGE_WRITE);
+        } else {
+            io_uring_prep_sync_file_range(sqe, fd, size, offset,
+                SYNC_FILE_RANGE_WRITE);
+        }
+        sqe->user_data = reinterpret_cast<uint64_t>(io_data);
+
+        if (auto ret = io_uring_submit(m_uring); ret < 0) {
+            throw_with("UringEngine: Failed to submit range sync: {}", strerror(errno));
         }
         m_uring_cqe_cnt.fetch_add(1);
     }
 
     void try_issue_sync_close(FileCtx *ctx) {
-        if (ctx->write_cnt == 0 && ctx->sync_close_ctx.is_valid) {
+        if (ctx->in_flight_ops() == 0 && ctx->sync_close_ctx.is_valid) {
             SPDLOG_INFO("[Io-Engine] Issue request[SyncClose: file_number={}]",
                 ctx->file_number);
             auto *sync_data = new IoData;
@@ -208,7 +257,7 @@ private:
         close_sqe->user_data = reinterpret_cast<uint64_t>(close_data);
 
         if (auto ret = io_uring_submit(m_uring); ret < 0) {
-            throw_with("UringEngine: Failed to submit uring: {}", strerror(errno));
+            throw_with("UringEngine: Failed to submit sync & close: {}", strerror(errno));
         }
         m_uring_cqe_cnt.fetch_add(2); // fetch_add 原子加法
     }
@@ -218,7 +267,7 @@ private:
         int req_cnt{};
 
         while (((req_cnt = m_uring_cqe_cnt.load()) > 0) // 先获取最新的 req_cnt
-            || not m_is_killed) {
+                || not m_is_killed) {
             if (req_cnt == 0) {
                 continue;
             }

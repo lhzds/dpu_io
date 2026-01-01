@@ -103,13 +103,13 @@ void read_args(int argc, char **argv) {
         "big pool cnt: {}\n"
         "big pool size: {}\n"
         "file size base: {}\n"
-        "sst padding len: {}\n",
+        "sst padding len: {}",
         backend_name, dev_pci, dev_rep_pci,
         uring_queue_depth, dpu_req_rb_cap, dpu_resp_rb_cap,
         sst_pool_dir, base_pool_size,
         big_pool_cnt, big_pool_size,
         file_size_base, sst_pad_len
-    );
+    ) << std::endl;
 }
 
 int main(int argc, char **argv) {

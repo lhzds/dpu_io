@@ -3,6 +3,7 @@
 #include <optional>
 
 #include "bytes.h"
+#include "comm/frontend.h"
 #include "comm/frontend_qp.h"
 #include "constant.h"
 #include "doca_wrapper/passive_consumer.h"
@@ -70,6 +71,28 @@ void FrontendQp::create_consumer(Frontend &frontend) {
                 throw_with("FrontendQp: Unexpected D2HRbMetaMsg type");
         }
     });
+}
+
+void FrontendQp::post_range_sync(size_t file_number, size_t offset,
+                                size_t size, bool wait_before) {
+    if (is_preping_write()) {
+        throw_with("FrontendQp: Preparing write now");
+    }
+    auto req = IoReqMsg::make_range_sync_req(file_number, offset, size, wait_before);
+    if (m_req_rb.cap() < req.size()) {
+        throw_with("FrontendQp: Too large to write");
+    }
+
+    while (m_req_rb.free_size() < req.size()) {
+        free_req_rb_space(req.size() - m_req_rb.free_size());
+    }
+
+    m_req_rb.write(req);
+    SPDLOG_INFO(
+        "[Frontend-Qp#{}] Post request[RangeSync: file_num={}, offset={}, size={}]"
+        "[Req-Rb: free_space={}]", m_id, file_number, offset, size, m_req_rb.free_size()
+    );
+    send_req_rb_new_size(req.size());
 }
 
 void FrontendQp::post_sync_close(size_t file_number, bool use_fsync) {

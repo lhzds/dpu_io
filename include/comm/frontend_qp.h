@@ -34,7 +34,7 @@ public:
     void prep_write(size_t file_number, size_t offset, int base_size_multiplier = 1);
     void append(const ConstBytesView &content);
     void post_write();
-
+    void post_range_sync(size_t file_number, size_t offset, size_t size, bool wait_before);
     void post_sync_close(size_t file_number, bool use_fsync);
 
     std::vector<std::pair<int, int>> wait_all();

@@ -1,8 +1,9 @@
 #!/bin/bash
 
-DEV=/dev/nvme3n1
+SCRIPT_DIR=$(dirname "$(realpath "$0")")
+source "$SCRIPT_DIR/../settings.sh"
 
-parted $DEV mklabel gpt
-parted $DEV mkpart primary 0% 50% --align optimal
-parted $DEV mkpart primary 50% 100% --align optimal
-parted $DEV print
+parted $HOST_DEV mklabel gpt
+parted $HOST_DEV mkpart primary 0% 50% --align optimal
+parted $HOST_DEV mkpart primary 50% 100% --align optimal
+parted $HOST_DEV print

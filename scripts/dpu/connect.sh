@@ -1,10 +1,9 @@
 #!/bin/bash
 
-SUBSYSTEM_NAME="test"
-PORT_NUM="4420" # 端口号
-IP_ADDR="192.168.1.20" # IB 网卡地址
+SCRIPT_DIR=$(dirname "$(realpath "$0")")
+source "$SCRIPT_DIR/../settings.sh"
 
 sudo modprobe -r nvme-rdma
 sudo modprobe nvme-rdma pi_disable=1
 
-sudo nvme connect -t rdma -n $SUBSYSTEM_NAME -a $IP_ADDR -s $PORT_NUM
+sudo nvme connect -t rdma -n $NVMEOF_SUBSYSTEM_NAME -a $NVMEOF_IP_ADDR -s $NVMEOF_PORT_NUM

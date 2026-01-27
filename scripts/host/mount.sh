@@ -1,10 +1,7 @@
 #!/bin/bash
 
-DEV1=/dev/nvme3n1p1
-MNT1=/home/olh/mnt/local/db
+SCRIPT_DIR=$(dirname "$(realpath "$0")")
+source "$SCRIPT_DIR/../settings.sh"
 
-DEV2=/dev/nvme3n1p2
-MNT2=/home/olh/mnt/local/sst_pool
-
-sudo mount "$DEV1" "$MNT1"
-sudo mount "$DEV2" "$MNT2"
+sudo mount "$HOST_DB_DEV" "$HOST_DB_MNT"
+sudo mount "$HOST_SST_DEV" "$HOST_SST_MNT"

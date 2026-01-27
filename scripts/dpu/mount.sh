@@ -1,9 +1,9 @@
 #!/bin/bash
 
-DEV_PATH=/dev/nvme1n1p2
-MNT_POINT=/home/olh/mnt/sst_pool
+SCRIPT_DIR=$(dirname "$(realpath "$0")")
+source "$SCRIPT_DIR/../settings.sh"
 
-mkdir -p $MNT_POINT
+mkdir -p $DPU_SST_MNT_POINT
 
-sudo mount $DEV_PATH $MNT_POINT
-sudo chmod 777 $MNT_POINT
+sudo mount $DPU_SST_DEV_PATH $DPU_SST_MNT_POINT
+sudo chmod 777 $DPU_SST_MNT_POINT

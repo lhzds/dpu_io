@@ -1,25 +1,22 @@
 #!/bin/bash
 
-DEV1=/dev/nvme3n1p1
-MNT1=/home/olh/mnt/local/db
+SCRIPT_DIR=$(dirname "$(realpath "$0")")
+source "$SCRIPT_DIR/../settings.sh"
 
-DEV2=/dev/nvme3n1p2
-MNT2=/home/olh/mnt/local/sst_pool
+mkdir -p "$HOST_DB_MNT"
+mkdir -p "$HOST_SST_MNT"
 
-mkdir -p "$MNT1"
-mkdir -p "$MNT2"
+sudo umount "$HOST_DB_MNT"
+sudo umount "$HOST_SST_MNT"
 
-sudo umount "$MNT1"
-sudo umount "$MNT2"
+sudo wipefs "$HOST_DB_DEV"
+sudo wipefs "$HOST_SST_DEV"
 
-sudo wipefs "$DEV1"
-sudo wipefs "$DEV2"
+sudo mkfs.ext4 "$HOST_DB_DEV"
+sudo mkfs.ext4 "$HOST_SST_DEV"
 
-sudo mkfs.ext4 "$DEV1"
-sudo mkfs.ext4 "$DEV2"
+sudo mount "$HOST_DB_DEV" "$HOST_DB_MNT"
+sudo mount "$HOST_SST_DEV" "$HOST_SST_MNT"
 
-sudo mount "$DEV1" "$MNT1"
-sudo mount "$DEV2" "$MNT2"
-
-sudo chmod 777 "$MNT1"
-sudo chmod 777 "$MNT2"
+sudo chmod 777 "$HOST_DB_MNT"
+sudo chmod 777 "$HOST_SST_MNT"

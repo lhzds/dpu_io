@@ -1,6 +1,7 @@
 #!/bin/bash
 
-MODE=release
+SCRIPT_DIR=$(dirname "$(realpath "$0")")
+source "$SCRIPT_DIR/../settings.sh"
 
 SUBPROJ_DIR=$(dirname "$(dirname "$(realpath "$(dirname "$0")")")")
 

@@ -1,5 +1,8 @@
 #!/bin/bash
 
-sudo ip link set ibs21f1 up
-sudo ip addr add 192.168.1.20/24 dev ibs21f1
-ip link show 
+SCRIPT_DIR=$(dirname "$(realpath "$0")")
+source "$SCRIPT_DIR/../settings.sh"
+
+sudo ip link set $HOST_IB_DEV up
+sudo ip addr add $HOST_IB_ADDR dev $HOST_IB_DEV
+ip link show

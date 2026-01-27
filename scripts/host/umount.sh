@@ -1,7 +1,7 @@
 #!/bin/bash
 
-MNT1=/home/olh/mnt/local/db
-MNT2=/home/olh/mnt/local/sst_pool
+SCRIPT_DIR=$(dirname "$(realpath "$0")")
+source "$SCRIPT_DIR/../settings.sh"
 
-umount "$MNT1"
-umount "$MNT2"
+umount "$HOST_DB_MNT"
+umount "$HOST_SST_MNT"

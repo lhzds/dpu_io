@@ -174,12 +174,17 @@ int main(int argc, char **argv) {
                 double write_mbps = write_bytes / (1024.0 * 1024.0) / secs.count();
 
                 SPDLOG_INFO(
-                    "[Perf] DMA: {:.2f} MiB/s, {:.2f} ops/s | Uring: {:.2f} MiB/s, "
-                    "write_ops {:.2f}/s, range_sync_ops {:.2f}/s, sync_close_ops {:.2f}/s",
-                    dma_mbps, dma_ops, write_mbps,
+                    "[Perf] DMA: {:.2f} MiB/s, {:.2f} ops/s, "
+                    "inflight={} queued={} | "
+                    "Uring: {:.2f} MiB/s, write_ops {:.2f}/s, range_sync_ops {:.2f}/s, "
+                    "sync_close_ops {:.2f}/s, inflight={}, cq_backlog={}",
+                    dma_mbps, dma_ops,
+                    cur_dma.inflight_tasks, cur_dma.queued_tasks,
+                    write_mbps,
                     write_ops / secs.count(),
                     range_sync_ops / secs.count(),
-                    sync_close_ops / secs.count()
+                    sync_close_ops / secs.count(),
+                    cur_uring.uring_cqe_backlog, cur_uring.cq_backlog
                 );
 
                 prev_ts = now_ts;

@@ -46,6 +46,9 @@ struct AtomicStats {
     std::atomic<uint64_t> write_ops{};
     std::atomic<uint64_t> range_sync_ops{};
     std::atomic<uint64_t> sync_close_ops{};
+    std::atomic<uint64_t> wait_all_ns_total{};
+    std::atomic<uint64_t> wait_all_cnt{};
+    std::atomic<uint64_t> wait_all_ns_max{};
 };
 
 Options read_args(int argc, char **argv) {
@@ -201,13 +204,33 @@ void run_worker(size_t thread_id, Frontend &frontend, const Options &opts, Atomi
 
         ++inflight_files;
         if (opts.wait_every_files > 0 && inflight_files >= opts.wait_every_files) {
+            auto start_ts = std::chrono::steady_clock::now();
             qp->wait_all();
+            auto end_ts = std::chrono::steady_clock::now();
+            auto wait_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(end_ts - start_ts).count();
+            stats.wait_all_ns_total.fetch_add(static_cast<uint64_t>(wait_ns), std::memory_order_relaxed);
+            stats.wait_all_cnt.fetch_add(1, std::memory_order_relaxed);
+            auto prev_max = stats.wait_all_ns_max.load(std::memory_order_relaxed);
+            while (wait_ns > static_cast<int64_t>(prev_max) &&
+                   !stats.wait_all_ns_max.compare_exchange_weak(
+                       prev_max, static_cast<uint64_t>(wait_ns), std::memory_order_relaxed)) {
+            }
             inflight_files = 0;
         }
     }
 
     if (inflight_files > 0) {
+        auto start_ts = std::chrono::steady_clock::now();
         qp->wait_all();
+        auto end_ts = std::chrono::steady_clock::now();
+        auto wait_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(end_ts - start_ts).count();
+        stats.wait_all_ns_total.fetch_add(static_cast<uint64_t>(wait_ns), std::memory_order_relaxed);
+        stats.wait_all_cnt.fetch_add(1, std::memory_order_relaxed);
+        auto prev_max = stats.wait_all_ns_max.load(std::memory_order_relaxed);
+        while (wait_ns > static_cast<int64_t>(prev_max) &&
+               !stats.wait_all_ns_max.compare_exchange_weak(
+                   prev_max, static_cast<uint64_t>(wait_ns), std::memory_order_relaxed)) {
+        }
     }
     frontend.free_qp(qp);
 }
@@ -242,6 +265,8 @@ int main(int argc, char **argv) {
         uint64_t prev_write_ops = 0;
         uint64_t prev_range_sync_ops = 0;
         uint64_t prev_sync_close_ops = 0;
+        uint64_t prev_wait_all_ns = 0;
+        uint64_t prev_wait_all_cnt = 0;
         stats_thread = std::thread([&] {
             while (!stop_stats.load(std::memory_order_relaxed)) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(opts.stats_interval_ms));
@@ -255,16 +280,27 @@ int main(int argc, char **argv) {
                 uint64_t cur_write_ops = stats.write_ops.load(std::memory_order_relaxed);
                 uint64_t cur_range_sync_ops = stats.range_sync_ops.load(std::memory_order_relaxed);
                 uint64_t cur_sync_close_ops = stats.sync_close_ops.load(std::memory_order_relaxed);
+                uint64_t cur_wait_all_ns = stats.wait_all_ns_total.load(std::memory_order_relaxed);
+                uint64_t cur_wait_all_cnt = stats.wait_all_cnt.load(std::memory_order_relaxed);
+                uint64_t cur_wait_all_ns_max = stats.wait_all_ns_max.load(std::memory_order_relaxed);
                 uint64_t delta_bytes = cur_write_bytes - prev_write_bytes;
                 uint64_t delta_write_ops = cur_write_ops - prev_write_ops;
                 uint64_t delta_range_sync_ops = cur_range_sync_ops - prev_range_sync_ops;
                 uint64_t delta_sync_close_ops = cur_sync_close_ops - prev_sync_close_ops;
+                uint64_t delta_wait_all_ns = cur_wait_all_ns - prev_wait_all_ns;
+                uint64_t delta_wait_all_cnt = cur_wait_all_cnt - prev_wait_all_cnt;
 
                 double mbps = delta_bytes / (1024.0 * 1024.0) / secs.count();
+                double wait_all_avg_ms = 0.0;
+                if (delta_wait_all_cnt > 0) {
+                    wait_all_avg_ms = (delta_wait_all_ns / 1e6) / delta_wait_all_cnt;
+                }
                 std::cout << "[Host-Perf] " << mbps << " MiB/s, "
                           << (delta_write_ops / secs.count()) << " write_ops/s, "
                           << (delta_range_sync_ops / secs.count()) << " range_sync_ops/s, "
-                          << (delta_sync_close_ops / secs.count()) << " sync_close_ops/s"
+                          << (delta_sync_close_ops / secs.count()) << " sync_close_ops/s, "
+                          << "wait_all_avg_ms " << wait_all_avg_ms << ", "
+                          << "wait_all_max_ms " << (cur_wait_all_ns_max / 1e6)
                           << std::endl;
 
                 prev_ts = now_ts;
@@ -272,6 +308,8 @@ int main(int argc, char **argv) {
                 prev_write_ops = cur_write_ops;
                 prev_range_sync_ops = cur_range_sync_ops;
                 prev_sync_close_ops = cur_sync_close_ops;
+                prev_wait_all_ns = cur_wait_all_ns;
+                prev_wait_all_cnt = cur_wait_all_cnt;
             }
         });
     }

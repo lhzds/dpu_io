@@ -25,6 +25,8 @@ public:
         uint64_t write_ops{};
         uint64_t range_sync_ops{};
         uint64_t sync_close_ops{};
+        uint64_t uring_cqe_backlog{};
+        uint64_t cq_backlog{};
     };
 
     UringEngine(uint32_t queue_depth, std::unique_ptr<SstPool> sst_pool)
@@ -51,7 +53,9 @@ public:
             m_stats_write_bytes.load(std::memory_order_relaxed),
             m_stats_write_ops.load(std::memory_order_relaxed),
             m_stats_range_sync_ops.load(std::memory_order_relaxed),
-            m_stats_sync_close_ops.load(std::memory_order_relaxed)
+            m_stats_sync_close_ops.load(std::memory_order_relaxed),
+            static_cast<uint64_t>(m_uring_cqe_cnt.load(std::memory_order_relaxed)),
+            m_stats_cq_size.load(std::memory_order_relaxed)
         };
     }
 
@@ -60,6 +64,7 @@ public:
         m_stats_write_ops.store(0, std::memory_order_relaxed);
         m_stats_range_sync_ops.store(0, std::memory_order_relaxed);
         m_stats_sync_close_ops.store(0, std::memory_order_relaxed);
+        m_stats_cq_size.store(0, std::memory_order_relaxed);
     }
 
     void write_async(size_t file_number, size_t offset, int base_size_multiplier,
@@ -113,6 +118,7 @@ public:
         if (not m_cq.pop(io_data)) {
             return false;
         }
+        m_stats_cq_size.fetch_add(-1, std::memory_order_relaxed);
 
         auto &ctx = io_data->ctx;
         int file_number = ctx->file_number;
@@ -319,6 +325,7 @@ private:
             while (not m_cq.push(io_data)) {
                 std::this_thread::yield();
             }
+            m_stats_cq_size.fetch_add(1, std::memory_order_relaxed);
         }
     }
 
@@ -332,6 +339,7 @@ private:
     std::atomic<uint64_t> m_stats_write_ops{};
     std::atomic<uint64_t> m_stats_range_sync_ops{};
     std::atomic<uint64_t> m_stats_sync_close_ops{};
+    std::atomic<uint64_t> m_stats_cq_size{};
 
     io_uring *m_uring{};
     std::unique_ptr<SstPool> m_sst_pool;

@@ -26,6 +26,8 @@ public:
     struct StatsSnapshot {
         uint64_t total_bytes{};
         uint64_t total_tasks{};
+        uint64_t inflight_tasks{};
+        uint64_t queued_tasks{};
     };
 
     QueueDma(doca_pe *pe, doca_dev *dev, size_t memcpy_task_slot_num)
@@ -37,13 +39,17 @@ public:
     StatsSnapshot stats_snapshot() const {
         return StatsSnapshot{
             m_stats_total_bytes.load(std::memory_order_relaxed),
-            m_stats_total_tasks.load(std::memory_order_relaxed)
+            m_stats_total_tasks.load(std::memory_order_relaxed),
+            m_stats_inflight_tasks.load(std::memory_order_relaxed),
+            m_stats_queued_tasks.load(std::memory_order_relaxed)
         };
     }
 
     void reset_stats() {
         m_stats_total_bytes.store(0, std::memory_order_relaxed);
         m_stats_total_tasks.store(0, std::memory_order_relaxed);
+        m_stats_inflight_tasks.store(0, std::memory_order_relaxed);
+        m_stats_queued_tasks.store(0, std::memory_order_relaxed);
     }
 
     void post_memcpy(docacxx::Mmap &src_mmap, size_t src_offset, docacxx::Mmap &dst_mmap, 
@@ -55,7 +61,16 @@ public:
             
             while (part_iter.has_next()) {
                 auto [part_offset, part_size] = part_iter.next();
-                m_memcpy_ctx.submit([&, size, shared_cb, src_offset, dst_offset, part_offset, part_size] {
+                bool will_queue = m_memcpy_ctx.processing_task_cnt() >= m_memcpy_ctx.task_slot_num();
+                if (will_queue) {
+                    m_stats_queued_tasks.fetch_add(1, std::memory_order_relaxed);
+                }
+                m_memcpy_ctx.submit([&, size, shared_cb, src_offset, dst_offset,
+                                     part_offset = part_offset, part_size = part_size, will_queue] {
+                    if (will_queue) {
+                        m_stats_queued_tasks.fetch_add(-1, std::memory_order_relaxed);
+                    }
+                    m_stats_inflight_tasks.fetch_add(1, std::memory_order_relaxed);
                     auto src = m_buf_inv.get_buf(src_mmap, src_offset + part_offset, part_size).release();
                     src->set_doca_buf_data(part_size);
                     auto dst = m_buf_inv.get_buf(dst_mmap, dst_offset + part_offset, part_size).release();
@@ -65,6 +80,7 @@ public:
                         delete dst;
                         m_stats_total_bytes.fetch_add(part_size, std::memory_order_relaxed);
                         m_stats_total_tasks.fetch_add(1, std::memory_order_relaxed);
+                        m_stats_inflight_tasks.fetch_add(-1, std::memory_order_relaxed);
                         if (shared_cb.use_count() == 1) {
                             shared_cb->operator()();
                         }
@@ -79,7 +95,15 @@ public:
             return;
         }
 
-        m_memcpy_ctx.submit([&, src_offset, dst_offset, size, cb = std::move(cb)] {
+        bool will_queue = m_memcpy_ctx.processing_task_cnt() >= m_memcpy_ctx.task_slot_num();
+        if (will_queue) {
+            m_stats_queued_tasks.fetch_add(1, std::memory_order_relaxed);
+        }
+        m_memcpy_ctx.submit([&, src_offset, dst_offset, size, cb = std::move(cb), will_queue] {
+            if (will_queue) {
+                m_stats_queued_tasks.fetch_add(-1, std::memory_order_relaxed);
+            }
+            m_stats_inflight_tasks.fetch_add(1, std::memory_order_relaxed);
             auto src = m_buf_inv.get_buf(src_mmap, src_offset, size).release();
             src->set_doca_buf_data(size);
             auto dst = m_buf_inv.get_buf(dst_mmap, dst_offset, size).release();
@@ -88,6 +112,7 @@ public:
                 delete dst;
                 m_stats_total_bytes.fetch_add(size, std::memory_order_relaxed);
                 m_stats_total_tasks.fetch_add(1, std::memory_order_relaxed);
+                m_stats_inflight_tasks.fetch_add(-1, std::memory_order_relaxed);
                 cb();
             });
             auto ret = submit(std::move(task));
@@ -121,5 +146,7 @@ private:
     docacxx::TaskContext<MemcpyTask> m_memcpy_ctx;
     std::atomic<uint64_t> m_stats_total_bytes{};
     std::atomic<uint64_t> m_stats_total_tasks{};
+    std::atomic<uint64_t> m_stats_inflight_tasks{};
+    std::atomic<uint64_t> m_stats_queued_tasks{};
 };
 }

@@ -3,7 +3,10 @@
 #include "io/uring_engine.h"
 
 #include <argparse/argparse.hpp>
+#include <atomic>
+#include <chrono>
 #include <fmt/format.h>
+#include <thread>
 
 using namespace pulsedb;
 
@@ -21,6 +24,7 @@ size_t big_pool_cnt;
 size_t big_pool_size;
 size_t file_size_base;
 size_t sst_pad_len;
+size_t stats_interval_ms;
 
 void read_args(int argc, char **argv) {
     argparse::ArgumentParser arg_parser;
@@ -71,6 +75,10 @@ void read_args(int argc, char **argv) {
         .help("sst padding len")
         .scan<'d', size_t>()
         .default_value(0);
+    arg_parser.add_argument("-i")
+        .help("stats interval ms (0 disable)")
+        .scan<'d', size_t>()
+        .default_value(0);
 
     arg_parser.parse_args(argc, argv);
 
@@ -88,6 +96,7 @@ void read_args(int argc, char **argv) {
     big_pool_size = arg_parser.get<size_t>("-S");
     file_size_base = arg_parser.get<size_t>("-b");
     sst_pad_len = arg_parser.get<size_t>("-p");
+    stats_interval_ms = arg_parser.get<size_t>("-i");
 
     std::cout << fmt::format(
         "backend name: {}\n"
@@ -122,8 +131,61 @@ int main(int argc, char **argv) {
     );
     SPDLOG_INFO("[DPU] Dpu-io backend running...");
     auto uring_ctx = std::make_unique<UringEngine>(uring_queue_depth, std::move(sst_pool));
+    auto *uring_ptr = uring_ctx.get();
     Backend backend(backend_name, dev_pci, dev_rep_pci,
         std::move(uring_ctx), dpu_req_rb_cap, dpu_resp_rb_cap);
+
+    std::atomic<bool> stop_stats{};
+    std::thread stats_thread;
+    if (stats_interval_ms > 0) {
+        auto prev_dma = backend.dma()->stats_snapshot();
+        auto prev_uring = uring_ptr->stats_snapshot();
+        auto prev_ts = std::chrono::steady_clock::now();
+        stats_thread = std::thread([&, prev_dma, prev_uring, prev_ts]() mutable {
+            while (!stop_stats.load(std::memory_order_relaxed)) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(stats_interval_ms));
+                auto now_ts = std::chrono::steady_clock::now();
+                auto cur_dma = backend.dma()->stats_snapshot();
+                auto cur_uring = uring_ptr->stats_snapshot();
+                std::chrono::duration<double> secs = now_ts - prev_ts;
+                if (secs.count() <= 0.0) {
+                    prev_ts = now_ts;
+                    prev_dma = cur_dma;
+                    prev_uring = cur_uring;
+                    continue;
+                }
+
+                auto dma_bytes = cur_dma.total_bytes - prev_dma.total_bytes;
+                auto dma_tasks = cur_dma.total_tasks - prev_dma.total_tasks;
+                double dma_mbps = dma_bytes / (1024.0 * 1024.0) / secs.count();
+                double dma_ops = dma_tasks / secs.count();
+
+                auto write_bytes = cur_uring.write_bytes - prev_uring.write_bytes;
+                auto write_ops = cur_uring.write_ops - prev_uring.write_ops;
+                auto range_sync_ops = cur_uring.range_sync_ops - prev_uring.range_sync_ops;
+                auto sync_close_ops = cur_uring.sync_close_ops - prev_uring.sync_close_ops;
+                double write_mbps = write_bytes / (1024.0 * 1024.0) / secs.count();
+
+                SPDLOG_INFO(
+                    "[Perf] DMA: {:.2f} MiB/s, {:.2f} ops/s | Uring: {:.2f} MiB/s, "
+                    "write_ops {:.2f}/s, range_sync_ops {:.2f}/s, sync_close_ops {:.2f}/s",
+                    dma_mbps, dma_ops, write_mbps,
+                    write_ops / secs.count(),
+                    range_sync_ops / secs.count(),
+                    sync_close_ops / secs.count()
+                );
+
+                prev_ts = now_ts;
+                prev_dma = cur_dma;
+                prev_uring = cur_uring;
+            }
+        });
+    }
+
     backend.run();
+    stop_stats.store(true, std::memory_order_relaxed);
+    if (stats_thread.joinable()) {
+        stats_thread.join();
+    }
     return 0;
 }

@@ -4,4 +4,4 @@ add_packages("argparse", "json")
 
 -- includes("io/xmake.lua")
 includes("dma/xmake.lua")
-includes("dma_io/xmake.lua")
+includes("compaction/xmake.lua")

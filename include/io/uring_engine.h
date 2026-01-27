@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <bits/types/struct_iovec.h>
 #include <cstddef>
 #include <cstring>
@@ -19,6 +20,13 @@ namespace pulsedb {
 // public 为前台线程接口，参考 doca pe 设计，非线程安全
 class UringEngine: public IoEngine {
 public:
+    struct StatsSnapshot {
+        uint64_t write_bytes{};
+        uint64_t write_ops{};
+        uint64_t range_sync_ops{};
+        uint64_t sync_close_ops{};
+    };
+
     UringEngine(uint32_t queue_depth, std::unique_ptr<SstPool> sst_pool)
         : m_uring(new io_uring), m_sst_pool(std::move(sst_pool)) {
         if (auto ret = io_uring_queue_init(queue_depth, m_uring, 0); ret < 0) {
@@ -36,6 +44,22 @@ public:
         }
         io_uring_queue_exit(m_uring);
         delete m_uring;
+    }
+
+    StatsSnapshot stats_snapshot() const {
+        return StatsSnapshot{
+            m_stats_write_bytes.load(std::memory_order_relaxed),
+            m_stats_write_ops.load(std::memory_order_relaxed),
+            m_stats_range_sync_ops.load(std::memory_order_relaxed),
+            m_stats_sync_close_ops.load(std::memory_order_relaxed)
+        };
+    }
+
+    void reset_stats() {
+        m_stats_write_bytes.store(0, std::memory_order_relaxed);
+        m_stats_write_ops.store(0, std::memory_order_relaxed);
+        m_stats_range_sync_ops.store(0, std::memory_order_relaxed);
+        m_stats_sync_close_ops.store(0, std::memory_order_relaxed);
     }
 
     void write_async(size_t file_number, size_t offset, int base_size_multiplier,
@@ -94,12 +118,15 @@ public:
         int file_number = ctx->file_number;
         if (io_data->op == Op::kWrite) {
             --ctx->write_cnt;
+            m_stats_write_bytes.fetch_add(static_cast<uint64_t>(io_data->res), std::memory_order_relaxed);
+            m_stats_write_ops.fetch_add(1, std::memory_order_relaxed);
             try_issue_sync_close(ctx);
             if (io_data->cb != nullptr) {
                 io_data->cb->operator()(file_number, io_data->res);
             }
         } else if (io_data->op == Op::kRangeSync) {
             --ctx->range_sync_cnt;
+            m_stats_range_sync_ops.fetch_add(1, std::memory_order_relaxed);
             try_issue_sync_close(ctx);
             if (io_data->cb != nullptr) {
                 io_data->cb->operator()(file_number, io_data->res);
@@ -108,6 +135,7 @@ public:
             // sync 和 close 完成顺序不固定，最后一个完成的调用生成回复
             auto &sync_close_ctx = io_data->ctx->sync_close_ctx;
             if ((++sync_close_ctx.seen_cqe_cnt) == 2) {
+                m_stats_sync_close_ops.fetch_add(1, std::memory_order_relaxed);
                 io_data->res = ctx->slot_id;
                 m_writing_files.erase(file_number);
                 if (sync_close_ctx.cb != nullptr) {
@@ -299,6 +327,11 @@ private:
     std::thread m_poller;
     std::atomic<bool> m_is_killed{};
     std::atomic<int> m_uring_cqe_cnt{}; // 用于保证 uring 可以正常退出
+
+    std::atomic<uint64_t> m_stats_write_bytes{};
+    std::atomic<uint64_t> m_stats_write_ops{};
+    std::atomic<uint64_t> m_stats_range_sync_ops{};
+    std::atomic<uint64_t> m_stats_sync_close_ops{};
 
     io_uring *m_uring{};
     std::unique_ptr<SstPool> m_sst_pool;

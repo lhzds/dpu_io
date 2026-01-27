@@ -23,3 +23,4 @@ constexpr size_t kSstBasePoolSize{2000};
 constexpr size_t kSstFileBaseSize{64 * MiB};
 constexpr size_t kSstPadSize{1 * MiB};
 constexpr size_t kUringQueueDepth{512};
+constexpr size_t kDpuDmaTaskSlotNum{256};

@@ -10,7 +10,7 @@ int main() {
         kSstFileBaseSize, kSstPadSize);
     auto uring_ctx = std::make_unique<UringEngine>(kUringQueueDepth, std::move(sst_pool));
     Backend backend(kBackendName, kDpuDevPci, kDpuDevRepPci,
-        std::move(uring_ctx), kDpuReqRbCap, kDpuRespRbCap);
+        std::move(uring_ctx), kDpuDmaTaskSlotNum, kDpuReqRbCap, kDpuRespRbCap);
     backend.run();
     return 0;
 }

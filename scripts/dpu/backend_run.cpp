@@ -15,6 +15,7 @@ std::string dev_pci;
 std::string dev_rep_pci;
 
 size_t uring_queue_depth;
+size_t dpu_dma_task_slot_num;
 size_t dpu_req_rb_cap;
 size_t dpu_resp_rb_cap;
 
@@ -43,6 +44,10 @@ void read_args(int argc, char **argv) {
         .help("uring queue depth")
         .required()
         .scan<'d', size_t>();
+    arg_parser.add_argument("--dpu_dma_task_slot_num")
+        .help("dpu dma task slot num")
+        .scan<'d', size_t>()
+        .default_value((size_t)256);
     arg_parser.add_argument("-x")
         .help("dpu req rb cap")
         .required()
@@ -87,6 +92,7 @@ void read_args(int argc, char **argv) {
     dev_rep_pci = arg_parser.get<std::string>("-R");
 
     uring_queue_depth = arg_parser.get<size_t>("-u");
+    dpu_dma_task_slot_num = arg_parser.get<size_t>("--dpu_dma_task_slot_num");
     dpu_req_rb_cap = arg_parser.get<size_t>("-x");
     dpu_resp_rb_cap = arg_parser.get<size_t>("-y");
 
@@ -104,6 +110,7 @@ void read_args(int argc, char **argv) {
         "dev rep pci: {}\n"
 
         "uring queue depth: {}\n"
+        "dpu dma task slot num: {}\n"
         "dpu req rb cap: {}\n"
         "dpu resp rb cap: {}\n"
 
@@ -114,7 +121,7 @@ void read_args(int argc, char **argv) {
         "file size base: {}\n"
         "sst padding len: {}",
         backend_name, dev_pci, dev_rep_pci,
-        uring_queue_depth, dpu_req_rb_cap, dpu_resp_rb_cap,
+        uring_queue_depth, dpu_dma_task_slot_num, dpu_req_rb_cap, dpu_resp_rb_cap,
         sst_pool_dir, base_pool_size,
         big_pool_cnt, big_pool_size,
         file_size_base, sst_pad_len
@@ -133,7 +140,7 @@ int main(int argc, char **argv) {
     auto uring_ctx = std::make_unique<UringEngine>(uring_queue_depth, std::move(sst_pool));
     auto *uring_ptr = uring_ctx.get();
     Backend backend(backend_name, dev_pci, dev_rep_pci,
-        std::move(uring_ctx), dpu_req_rb_cap, dpu_resp_rb_cap);
+        std::move(uring_ctx), dpu_dma_task_slot_num, dpu_req_rb_cap, dpu_resp_rb_cap);
 
     std::atomic<bool> stop_stats{};
     std::thread stats_thread;

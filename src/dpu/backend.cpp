@@ -1,6 +1,5 @@
 #include "comm/backend.h"
 #include "bytes.h"
-#include "constant.h"
 #include "comm/dma_qp_mapping.h"
 #include "docacxx/ctx/server.h"
 #include "format/ctrl_msg.h"
@@ -16,7 +15,8 @@ namespace pulsedb {
     
 Backend::Backend(const std::string_view &name, const std::string_view &dev_pci,
     const std::string_view &dev_rep_pci, std::unique_ptr<IoEngine> io_ctx,
-    size_t dpu_req_rb_cap, size_t dpu_resp_rb_cap): m_io_ctx(std::move(io_ctx)) {
+    size_t dpu_dma_task_slot_num, size_t dpu_req_rb_cap, size_t dpu_resp_rb_cap)
+    : m_io_ctx(std::move(io_ctx)) {
     SPDLOG_INFO("[Backend] Starting...");
 
     docacxx::check_derr(
@@ -29,7 +29,7 @@ Backend::Backend(const std::string_view &name, const std::string_view &dev_pci,
     );
     docacxx::check_derr(doca_pe_create(&m_pe), "Backend: Failed to create pe");
 
-    m_dma = std::make_unique<QueueDma>(m_pe, m_dev, kDpuDmaTaskSlotNum);
+    m_dma = std::make_unique<QueueDma>(m_pe, m_dev, dpu_dma_task_slot_num);
     m_dma->start_sync();
 
     docacxx::comch::Server::Cfg server_cfg;

@@ -123,6 +123,10 @@ public:
     }
 
     void delete_file(size_t file_number) override {
+        // 可能删除没有创建的 SST 文件
+        if (not m_sst_pool->has_slot(file_number)) {
+            return;
+        }
         m_sst_pool->free_slot(file_number);
     }
 

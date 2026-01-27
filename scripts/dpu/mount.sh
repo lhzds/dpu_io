@@ -1,6 +1,6 @@
 #!/bin/bash
 
-DEV_PATH=/dev/nvme1n3p2
+DEV_PATH=/dev/nvme1n1p2
 MNT_POINT=/home/olh/mnt/sst_pool
 
 mkdir -p $MNT_POINT

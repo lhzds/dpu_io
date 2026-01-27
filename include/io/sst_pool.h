@@ -17,6 +17,7 @@ public:
   
   std::optional<int> alloc_slot(size_t file_number, int base_size_multiplier);
   void free_slot(size_t file_number);
+  bool has_slot(size_t file_number) const;
 
   std::string slot_file_name(int slot_id) {
     return m_sst_dir + "/" + std::to_string(slot_id);

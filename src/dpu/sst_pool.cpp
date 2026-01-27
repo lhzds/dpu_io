@@ -111,6 +111,10 @@ void SstPool::free_slot(size_t file_number) {
   m_avail_slots[pool_id].push_back(slot_id);
 }
 
+bool SstPool::has_slot(size_t file_number) const {
+  return m_file_slot.find(file_number) != m_file_slot.end();
+}
+
 std::pair<int, int> SstPool::slot_id_range_of(int pool_id) const {
   assert(pool_id < pool_cnt());
 

@@ -1,0 +1,21 @@
+{
+  "host_exe": "~/pulseDB/pulsedb/build/linux/x86_64/release/bench_comch_lat_host",
+  "dpu_exe": "~/pulsedb/build/linux/arm64/release/bench_comch_lat_dpu",
+  "output_dir": "~/comch_lat",
+  "dpu_username": "olh",
+  "dpu_ip": "192.168.100.2",
+  "repeat_time": 10000,
+  "start_sleep_sec": 2,
+  "msg_sizes": [2048, 4096, 8192, 16384, 32768, 65536, 131072],
+  "host_args": {
+    "server_name": "server",
+    "dev_pci": "b1:00.0",
+    "dma_buf_max_size": 131072
+  },
+  "dpu_args": {
+    "server_name": "server",
+    "dev_pci": "03:00.0",
+    "dev_rep_pci": "b1:00.0",
+    "dma_buf_max_size": 131072
+  }
+}

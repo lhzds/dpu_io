@@ -1,4 +1,3 @@
-#include "config.h"
 #include "docacxx/ctx/dma.h"
 #include "docacxx/ctx/server.h"
 #include "docacxx/mem.h"
@@ -16,13 +15,38 @@
 using namespace pulsedb;
 using Json = nlohmann::json;
 
-size_t dma_size;
-std::string output_dir;
-size_t repeat_time;
+struct InitMsgHeader {
+    char *remote_mem_addr;
+    size_t remote_mem_size;
+    size_t remote_mmap_desc_size;
+};
 
-void read_args(int argc, char **argv) {
-    argparse::ArgumentParser program("dma_exp");
-    
+struct Options {
+    std::string server_name;
+    std::string dev_pci;
+    std::string dev_rep_pci;
+    size_t dma_buf_max_size{};
+    size_t dma_size{};
+    std::string output_dir;
+    size_t repeat_time{};
+};
+
+Options read_args(int argc, char **argv) {
+    argparse::ArgumentParser program("comch_lat_dpu");
+
+    program.add_argument("--server_name")
+        .help("comch server name")
+        .required();
+    program.add_argument("--dev_pci")
+        .help("dpu dev pci")
+        .required();
+    program.add_argument("--dev_rep_pci")
+        .help("dpu dev rep pci")
+        .required();
+    program.add_argument("--dma_buf_max_size")
+        .help("dma buffer max size")
+        .required()
+        .scan<'d', size_t>();
     program.add_argument("-b")
         .help("dma size")
         .required()
@@ -38,24 +62,30 @@ void read_args(int argc, char **argv) {
     try {
         program.parse_args(argc, argv);
     }
-    catch (const std::exception& err) {
+    catch (const std::exception &err) {
         std::cerr << err.what() << std::endl;
         std::cerr << program;
         std::exit(1);
     }
 
-    dma_size = program.get<size_t>("-b");
-    output_dir = program.get<std::string>("-o");
-    repeat_time = program.get<size_t>("-r");
+    Options opts;
+    opts.server_name = program.get<std::string>("--server_name");
+    opts.dev_pci = program.get<std::string>("--dev_pci");
+    opts.dev_rep_pci = program.get<std::string>("--dev_rep_pci");
+    opts.dma_buf_max_size = program.get<size_t>("--dma_buf_max_size");
+    opts.dma_size = program.get<size_t>("-b");
+    opts.output_dir = program.get<std::string>("-o");
+    opts.repeat_time = program.get<size_t>("-r");
 
-    std::cout << "Dma Size: " << dma_size << std::endl;
-    std::cout << "Output Dir: " << output_dir << std::endl;
-    std::cout << "Repeat Time: " << repeat_time << std::endl;
+    if (opts.dma_size > opts.dma_buf_max_size) {
+        throw_with("dma_size must be <= dma_buf_max_size");
+    }
+    return opts;
 }
 
 void do_dma(doca_pe *pe, docacxx::Dma &dma, docacxx::Buffer &src, docacxx::Buffer &dst) {
     bool is_finished{};
-    auto dma_task = dma.alloc_memcpy_task(src, dst, [&](const auto &task) {
+    auto dma_task = dma.alloc_memcpy_task(src, dst, [&](const auto &) {
         is_finished = true;
     });
     dma.submit(std::move(dma_task));
@@ -65,17 +95,17 @@ void do_dma(doca_pe *pe, docacxx::Dma &dma, docacxx::Buffer &src, docacxx::Buffe
 }
 
 int main(int argc, char **argv) {
-    read_args(argc, argv);
+    auto opts = read_args(argc, argv);
 
     doca_dev *dev{};
     doca_dev_rep *dev_rep{};
     doca_pe *pe{};
-    docacxx::check_derr(docacxx::open_doca_device_with_pci(kDpuDevPci, &dev),
+    docacxx::check_derr(docacxx::open_doca_device_with_pci(opts.dev_pci.c_str(), &dev),
         "failed to open dev");
     docacxx::check_derr(docacxx::open_doca_device_rep_with_pci(dev, DOCA_DEVINFO_REP_FILTER_NET,
-        kDpuDevRepPci, &dev_rep), "failed to open dev rep");
+        opts.dev_rep_pci.c_str(), &dev_rep), "failed to open dev rep");
     docacxx::check_derr(doca_pe_create(&pe), "failed to create pe");
-    
+
     ScopeGuard guard([&] {
         if (auto result = doca_pe_destroy(pe); result != DOCA_SUCCESS) {
             std::cerr << "failed to destroy pe: " << doca_error_get_descr(result) << std::endl;
@@ -90,7 +120,7 @@ int main(int argc, char **argv) {
 
     docacxx::comch::Server::Cfg server_cfg;
     server_cfg.max_send_task_slot_num = 1;
-    docacxx::comch::Server server(kServerName, dev, dev_rep, pe, server_cfg);
+    docacxx::comch::Server server(opts.server_name.c_str(), dev, dev_rep, pe, server_cfg);
     bool is_sended{};
     server.set_send_cb([&](auto) {
         is_sended = true;
@@ -99,8 +129,8 @@ int main(int argc, char **argv) {
     server.set_new_conn_cb([&](doca_comch_connection *c) {
         conn = c;
     });
-    std::unique_ptr<docacxx::Mmap> remote_mmap;    
-    server.set_recv_cb([&](doca_comch_connection *conn, uint8_t *data, uint32_t len) {
+    std::unique_ptr<docacxx::Mmap> remote_mmap;
+    server.set_recv_cb([&](doca_comch_connection *, uint8_t *data, uint32_t) {
         auto *header = (InitMsgHeader *)data;
         auto *remote_mmap_desc_addr = (char *)(header + 1);
         std::string_view remote_mmap_desc(remote_mmap_desc_addr, header->remote_mmap_desc_size);
@@ -112,35 +142,35 @@ int main(int argc, char **argv) {
     while (not remote_mmap) {
         doca_pe_progress(pe);
     }
-    docacxx::Mmap local_mmap(dev, DMA_BUF_MAX_SIZE);
+    docacxx::Mmap local_mmap(dev, opts.dma_buf_max_size);
     docacxx::BufInventory buf_inv(dev, 2);
     docacxx::Dma::Cfg dma_cfg;
     dma_cfg.memcpy_task_slot_num = 1;
     docacxx::Dma dma(pe, dev, dma_cfg);
     dma.start_sync();
 
-    auto local_buf = buf_inv.get_buf(local_mmap, size_t(0), dma_size);
-    auto remote_buf = buf_inv.get_buf(*remote_mmap, size_t(0), dma_size);
+    auto local_buf = buf_inv.get_buf(local_mmap, size_t(0), opts.dma_size);
+    auto remote_buf = buf_inv.get_buf(*remote_mmap, size_t(0), opts.dma_size);
 
     ClockDuration read_time;
     ClockDuration write_time;
 
-    remote_buf->set_doca_buf_data(dma_size);
-    for (size_t i{}; i < repeat_time; ++i) {
+    remote_buf->set_doca_buf_data(opts.dma_size);
+    for (size_t i{}; i < opts.repeat_time; ++i) {
         local_buf->clear_doca_buf_data();
         read_time += clock([&] {
             do_dma(pe, dma, *remote_buf, *local_buf);
         });
     }
 
-    local_buf->set_doca_buf_data(dma_size);
-    for (size_t i{}; i < repeat_time; ++i) {
+    local_buf->set_doca_buf_data(opts.dma_size);
+    for (size_t i{}; i < opts.repeat_time; ++i) {
         remote_buf->clear_doca_buf_data();
         write_time += clock([&] {
             do_dma(pe, dma, *local_buf, *remote_buf);
         });
     }
-    
+
     dma.clean_sync();
 
     std::string exit_msg = "Exit";
@@ -151,15 +181,15 @@ int main(int argc, char **argv) {
     }
     server.clean_sync();
 
-    auto output_file = output_dir + "/" + std::to_string(dma_size) + ".json";
+    auto output_file = opts.output_dir + "/" + std::to_string(opts.dma_size) + ".json";
     std::ofstream output_fs(output_file);
     if (not output_fs) {
-        throw_with("Unable to open " + output_file);   
+        throw_with("Unable to open " + output_file);
     }
 
     Json json;
-    json["dma_read_lat"] = std::to_string(read_time.count() / (1.0 * repeat_time)) + "ns";
-    json["dma_write_lat"] = std::to_string(write_time.count() / (1.0 * repeat_time)) + "ns";
+    json["dma_read_lat"] = std::to_string(read_time.count() / (1.0 * opts.repeat_time)) + "ns";
+    json["dma_write_lat"] = std::to_string(write_time.count() / (1.0 * opts.repeat_time)) + "ns";
 
     std::cout << json.dump(4) << std::endl;
     output_fs << json.dump(4) << std::endl;

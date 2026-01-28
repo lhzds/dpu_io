@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <bits/types/struct_iovec.h>
 #include <cstddef>
 #include <cstring>
@@ -27,6 +28,9 @@ public:
         uint64_t sync_close_ops{};
         uint64_t uring_cqe_backlog{};
         uint64_t cq_backlog{};
+        uint64_t sync_close_wait_ns_total{};
+        uint64_t sync_close_wait_cnt{};
+        uint64_t sync_close_wait_ns_max{};
     };
 
     UringEngine(uint32_t queue_depth, std::unique_ptr<SstPool> sst_pool)
@@ -55,7 +59,10 @@ public:
             m_stats_range_sync_ops.load(std::memory_order_relaxed),
             m_stats_sync_close_ops.load(std::memory_order_relaxed),
             static_cast<uint64_t>(m_uring_cqe_cnt.load(std::memory_order_relaxed)),
-            m_stats_cq_size.load(std::memory_order_relaxed)
+            m_stats_cq_size.load(std::memory_order_relaxed),
+            m_stats_sync_close_wait_ns_total.load(std::memory_order_relaxed),
+            m_stats_sync_close_wait_cnt.load(std::memory_order_relaxed),
+            m_stats_sync_close_wait_ns_max.load(std::memory_order_relaxed)
         };
     }
 
@@ -65,6 +72,9 @@ public:
         m_stats_range_sync_ops.store(0, std::memory_order_relaxed);
         m_stats_sync_close_ops.store(0, std::memory_order_relaxed);
         m_stats_cq_size.store(0, std::memory_order_relaxed);
+        m_stats_sync_close_wait_ns_total.store(0, std::memory_order_relaxed);
+        m_stats_sync_close_wait_cnt.store(0, std::memory_order_relaxed);
+        m_stats_sync_close_wait_ns_max.store(0, std::memory_order_relaxed);
     }
 
     void write_async(size_t file_number, size_t offset, int base_size_multiplier,
@@ -181,6 +191,8 @@ private:
             int seen_cqe_cnt{};
             bool use_fsync{};
             CallbackFn *cb{};
+            bool wait_started{};
+            std::chrono::steady_clock::time_point wait_start_ts{};
         } sync_close_ctx{};
     };
     struct IoData {
@@ -260,16 +272,43 @@ private:
     }
 
     void try_issue_sync_close(FileCtx *ctx) {
-        if (ctx->in_flight_ops() == 0 && ctx->sync_close_ctx.is_valid) {
+        auto &sync_close_ctx = ctx->sync_close_ctx;
+        if (not sync_close_ctx.is_valid) {
+            return;
+        }
+        if (ctx->in_flight_ops() > 0) {
+            if (!sync_close_ctx.wait_started) {
+                sync_close_ctx.wait_started = true;
+                sync_close_ctx.wait_start_ts = std::chrono::steady_clock::now();
+            }
+            return;
+        }
+        if (ctx->in_flight_ops() == 0) {
             SPDLOG_INFO("[Io-Engine] Issue request[SyncClose: file_number={}]",
                 ctx->file_number);
+            if (sync_close_ctx.wait_started) {
+                auto now_ts = std::chrono::steady_clock::now();
+                auto wait_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    now_ts - sync_close_ctx.wait_start_ts).count();
+                if (wait_ns > 0) {
+                    m_stats_sync_close_wait_ns_total.fetch_add(
+                        static_cast<uint64_t>(wait_ns), std::memory_order_relaxed);
+                    m_stats_sync_close_wait_cnt.fetch_add(1, std::memory_order_relaxed);
+                    auto prev_max = m_stats_sync_close_wait_ns_max.load(std::memory_order_relaxed);
+                    while (wait_ns > static_cast<int64_t>(prev_max) &&
+                           !m_stats_sync_close_wait_ns_max.compare_exchange_weak(
+                               prev_max, static_cast<uint64_t>(wait_ns), std::memory_order_relaxed)) {
+                    }
+                }
+                sync_close_ctx.wait_started = false;
+            }
             auto *sync_data = new IoData;
             sync_data->op = Op::kSyncClose;
             sync_data->ctx = ctx;
             auto *close_data = new IoData;
             close_data->op = Op::kSyncClose;
             close_data->ctx = ctx;
-            issue_sync_close(ctx->os_fd, ctx->sync_close_ctx.use_fsync,
+            issue_sync_close(ctx->os_fd, sync_close_ctx.use_fsync,
                 sync_data, close_data);
         }
     }
@@ -340,6 +379,9 @@ private:
     std::atomic<uint64_t> m_stats_range_sync_ops{};
     std::atomic<uint64_t> m_stats_sync_close_ops{};
     std::atomic<uint64_t> m_stats_cq_size{};
+    std::atomic<uint64_t> m_stats_sync_close_wait_ns_total{};
+    std::atomic<uint64_t> m_stats_sync_close_wait_cnt{};
+    std::atomic<uint64_t> m_stats_sync_close_wait_ns_max{};
 
     io_uring *m_uring{};
     std::unique_ptr<SstPool> m_sst_pool;

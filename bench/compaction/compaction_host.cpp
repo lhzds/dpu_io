@@ -1,8 +1,10 @@
 #include <argparse/argparse.hpp>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <iostream>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -24,6 +26,7 @@ struct Options {
     size_t qp_num{};
     size_t req_rb_cap{};
     size_t resp_rb_cap{};
+    size_t slot_pool_size{};
 
     size_t threads{};
     size_t files_per_thread{};
@@ -42,13 +45,44 @@ struct Options {
 };
 
 struct AtomicStats {
-    std::atomic<uint64_t> write_bytes{};
-    std::atomic<uint64_t> write_ops{};
-    std::atomic<uint64_t> range_sync_ops{};
-    std::atomic<uint64_t> sync_close_ops{};
     std::atomic<uint64_t> wait_all_ns_total{};
     std::atomic<uint64_t> wait_all_cnt{};
     std::atomic<uint64_t> wait_all_ns_max{};
+    std::atomic<uint64_t> wait_slot_ns_total{};
+    std::atomic<uint64_t> wait_slot_cnt{};
+    std::atomic<uint64_t> wait_slot_ns_max{};
+};
+
+class SlotPool {
+public:
+    explicit SlotPool(size_t size): m_available(size) {}
+
+    uint64_t acquire() {
+        std::unique_lock<std::mutex> lock(m_mu);
+        if (m_available > 0) {
+            --m_available;
+            return 0;
+        }
+        auto start = std::chrono::steady_clock::now();
+        m_cv.wait(lock, [&] { return m_available > 0; });
+        --m_available;
+        auto end = std::chrono::steady_clock::now();
+        return static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count());
+    }
+
+    void release(size_t n) {
+        {
+            std::lock_guard<std::mutex> lock(m_mu);
+            m_available += n;
+        }
+        m_cv.notify_all();
+    }
+
+private:
+    std::mutex m_mu;
+    std::condition_variable m_cv;
+    size_t m_available{};
 };
 
 Options read_args(int argc, char **argv) {
@@ -72,6 +106,10 @@ Options read_args(int argc, char **argv) {
         .help("host resp rb cap")
         .scan<'d', size_t>()
         .default_value(1 * MiB);
+    arg_parser.add_argument("--slot_pool_size")
+        .help("max in-flight files limited by sst pool size")
+        .scan<'d', size_t>()
+        .required();
 
     arg_parser.add_argument("-t")
         .help("threads")
@@ -132,6 +170,7 @@ Options read_args(int argc, char **argv) {
     opts.qp_num = arg_parser.get<size_t>("-q");
     opts.req_rb_cap = arg_parser.get<size_t>("-x");
     opts.resp_rb_cap = arg_parser.get<size_t>("-y");
+    opts.slot_pool_size = arg_parser.get<size_t>("--slot_pool_size");
 
     opts.threads = arg_parser.get<size_t>("-t");
     opts.files_per_thread = arg_parser.get<size_t>("-f");
@@ -157,6 +196,9 @@ Options read_args(int argc, char **argv) {
     if (opts.write_size > opts.req_rb_cap) {
         throw_with("write_size must be <= req_rb_cap");
     }
+    if (opts.slot_pool_size == 0) {
+        throw_with("slot_pool_size must be > 0");
+    }
     if (opts.base_size_multiplier <= 0) {
         if (opts.file_size_base == 0) {
             throw_with("file_size_base must be > 0 for auto multiplier");
@@ -171,15 +213,26 @@ Options read_args(int argc, char **argv) {
     return opts;
 }
 
-void run_worker(size_t thread_id, Frontend &frontend, const Options &opts, AtomicStats &stats) {
+void run_worker(size_t thread_id, Frontend &frontend, const Options &opts, AtomicStats &stats,
+                SlotPool &slot_pool, std::atomic<size_t> &next_file_number) {
     auto *qp = frontend.alloc_qp();
 
     std::string payload(opts.write_size, static_cast<char>('a' + (thread_id % 26)));
-    size_t file_base = opts.start_file_number + thread_id * opts.files_per_thread;
     size_t inflight_files = 0;
 
     for (size_t f = 0; f < opts.files_per_thread; ++f) {
-        size_t file_number = file_base + f;
+        auto wait_ns = slot_pool.acquire();
+        if (wait_ns > 0) {
+            stats.wait_slot_ns_total.fetch_add(wait_ns, std::memory_order_relaxed);
+            stats.wait_slot_cnt.fetch_add(1, std::memory_order_relaxed);
+            auto prev_max = stats.wait_slot_ns_max.load(std::memory_order_relaxed);
+            while (wait_ns > static_cast<uint64_t>(prev_max) &&
+                   !stats.wait_slot_ns_max.compare_exchange_weak(
+                       prev_max, wait_ns, std::memory_order_relaxed)) {
+            }
+        }
+
+        size_t file_number = next_file_number.fetch_add(1, std::memory_order_relaxed);
         size_t offset = 0;
         size_t last_sync_offset = 0;
         while (offset < opts.file_size) {
@@ -187,25 +240,21 @@ void run_worker(size_t thread_id, Frontend &frontend, const Options &opts, Atomi
             qp->prep_write(file_number, offset, opts.base_size_multiplier);
             qp->append({payload.data(), cur_size});
             qp->post_write();
-            stats.write_bytes.fetch_add(cur_size, std::memory_order_relaxed);
-            stats.write_ops.fetch_add(1, std::memory_order_relaxed);
 
             offset += cur_size;
             if (opts.range_sync_size > 0 &&
                 (offset - last_sync_offset) >= opts.range_sync_size) {
                 size_t sync_size = offset - last_sync_offset;
                 qp->post_range_sync(file_number, last_sync_offset, sync_size, opts.wait_before);
-                stats.range_sync_ops.fetch_add(1, std::memory_order_relaxed);
                 last_sync_offset = offset;
             }
         }
         qp->post_sync_close(file_number, opts.use_fsync);
-        stats.sync_close_ops.fetch_add(1, std::memory_order_relaxed);
 
         ++inflight_files;
         if (opts.wait_every_files > 0 && inflight_files >= opts.wait_every_files) {
             auto start_ts = std::chrono::steady_clock::now();
-            qp->wait_all();
+            auto file_map = qp->wait_all();
             auto end_ts = std::chrono::steady_clock::now();
             auto wait_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(end_ts - start_ts).count();
             stats.wait_all_ns_total.fetch_add(static_cast<uint64_t>(wait_ns), std::memory_order_relaxed);
@@ -215,13 +264,22 @@ void run_worker(size_t thread_id, Frontend &frontend, const Options &opts, Atomi
                    !stats.wait_all_ns_max.compare_exchange_weak(
                        prev_max, static_cast<uint64_t>(wait_ns), std::memory_order_relaxed)) {
             }
+            if (!file_map.empty()) {
+                std::vector<size_t> file_nums;
+                file_nums.reserve(file_map.size());
+                for (const auto &item : file_map) {
+                    file_nums.push_back(item.first);
+                }
+                frontend.delete_files(file_nums);
+                slot_pool.release(file_nums.size());
+            }
             inflight_files = 0;
         }
     }
 
     if (inflight_files > 0) {
         auto start_ts = std::chrono::steady_clock::now();
-        qp->wait_all();
+        auto file_map = qp->wait_all();
         auto end_ts = std::chrono::steady_clock::now();
         auto wait_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(end_ts - start_ts).count();
         stats.wait_all_ns_total.fetch_add(static_cast<uint64_t>(wait_ns), std::memory_order_relaxed);
@@ -230,6 +288,15 @@ void run_worker(size_t thread_id, Frontend &frontend, const Options &opts, Atomi
         while (wait_ns > static_cast<int64_t>(prev_max) &&
                !stats.wait_all_ns_max.compare_exchange_weak(
                    prev_max, static_cast<uint64_t>(wait_ns), std::memory_order_relaxed)) {
+        }
+        if (!file_map.empty()) {
+            std::vector<size_t> file_nums;
+            file_nums.reserve(file_map.size());
+            for (const auto &item : file_map) {
+                file_nums.push_back(item.first);
+            }
+            frontend.delete_files(file_nums);
+            slot_pool.release(file_nums.size());
         }
     }
     frontend.free_qp(qp);
@@ -242,6 +309,7 @@ int main(int argc, char **argv) {
               << "dev_pci: " << opts.dev_pci << "\n"
               << "threads: " << opts.threads << "\n"
               << "qp_num: " << opts.qp_num << "\n"
+              << "slot_pool_size: " << opts.slot_pool_size << "\n"
               << "files/thread: " << opts.files_per_thread << "\n"
               << "wait_every_files: " << opts.wait_every_files << "\n"
               << "file_size: " << opts.file_size << "\n"
@@ -257,16 +325,16 @@ int main(int argc, char **argv) {
     );
 
     AtomicStats stats;
+    SlotPool slot_pool(opts.slot_pool_size);
+    std::atomic<size_t> next_file_number{opts.start_file_number};
     std::atomic<bool> stop_stats{};
     std::thread stats_thread;
     if (opts.stats_interval_ms > 0) {
         auto prev_ts = std::chrono::steady_clock::now();
-        uint64_t prev_write_bytes = 0;
-        uint64_t prev_write_ops = 0;
-        uint64_t prev_range_sync_ops = 0;
-        uint64_t prev_sync_close_ops = 0;
         uint64_t prev_wait_all_ns = 0;
         uint64_t prev_wait_all_cnt = 0;
+        uint64_t prev_wait_slot_ns = 0;
+        uint64_t prev_wait_slot_cnt = 0;
         stats_thread = std::thread([&] {
             while (!stop_stats.load(std::memory_order_relaxed)) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(opts.stats_interval_ms));
@@ -276,40 +344,37 @@ int main(int argc, char **argv) {
                     prev_ts = now_ts;
                     continue;
                 }
-                uint64_t cur_write_bytes = stats.write_bytes.load(std::memory_order_relaxed);
-                uint64_t cur_write_ops = stats.write_ops.load(std::memory_order_relaxed);
-                uint64_t cur_range_sync_ops = stats.range_sync_ops.load(std::memory_order_relaxed);
-                uint64_t cur_sync_close_ops = stats.sync_close_ops.load(std::memory_order_relaxed);
                 uint64_t cur_wait_all_ns = stats.wait_all_ns_total.load(std::memory_order_relaxed);
                 uint64_t cur_wait_all_cnt = stats.wait_all_cnt.load(std::memory_order_relaxed);
                 uint64_t cur_wait_all_ns_max = stats.wait_all_ns_max.load(std::memory_order_relaxed);
-                uint64_t delta_bytes = cur_write_bytes - prev_write_bytes;
-                uint64_t delta_write_ops = cur_write_ops - prev_write_ops;
-                uint64_t delta_range_sync_ops = cur_range_sync_ops - prev_range_sync_ops;
-                uint64_t delta_sync_close_ops = cur_sync_close_ops - prev_sync_close_ops;
+                uint64_t cur_wait_slot_ns = stats.wait_slot_ns_total.load(std::memory_order_relaxed);
+                uint64_t cur_wait_slot_cnt = stats.wait_slot_cnt.load(std::memory_order_relaxed);
+                uint64_t cur_wait_slot_ns_max = stats.wait_slot_ns_max.load(std::memory_order_relaxed);
                 uint64_t delta_wait_all_ns = cur_wait_all_ns - prev_wait_all_ns;
                 uint64_t delta_wait_all_cnt = cur_wait_all_cnt - prev_wait_all_cnt;
+                uint64_t delta_wait_slot_ns = cur_wait_slot_ns - prev_wait_slot_ns;
+                uint64_t delta_wait_slot_cnt = cur_wait_slot_cnt - prev_wait_slot_cnt;
 
-                double mbps = delta_bytes / (1024.0 * 1024.0) / secs.count();
                 double wait_all_avg_ms = 0.0;
                 if (delta_wait_all_cnt > 0) {
                     wait_all_avg_ms = (delta_wait_all_ns / 1e6) / delta_wait_all_cnt;
                 }
-                std::cout << "[Host-Perf] " << mbps << " MiB/s, "
-                          << (delta_write_ops / secs.count()) << " write_ops/s, "
-                          << (delta_range_sync_ops / secs.count()) << " range_sync_ops/s, "
-                          << (delta_sync_close_ops / secs.count()) << " sync_close_ops/s, "
+                double wait_slot_avg_ms = 0.0;
+                if (delta_wait_slot_cnt > 0) {
+                    wait_slot_avg_ms = (delta_wait_slot_ns / 1e6) / delta_wait_slot_cnt;
+                }
+                std::cout << "[Host-Perf] "
                           << "wait_all_avg_ms " << wait_all_avg_ms << ", "
-                          << "wait_all_max_ms " << (cur_wait_all_ns_max / 1e6)
+                          << "wait_all_max_ms " << (cur_wait_all_ns_max / 1e6) << ", "
+                          << "wait_slot_avg_ms " << wait_slot_avg_ms << ", "
+                          << "wait_slot_max_ms " << (cur_wait_slot_ns_max / 1e6)
                           << std::endl;
 
                 prev_ts = now_ts;
-                prev_write_bytes = cur_write_bytes;
-                prev_write_ops = cur_write_ops;
-                prev_range_sync_ops = cur_range_sync_ops;
-                prev_sync_close_ops = cur_sync_close_ops;
                 prev_wait_all_ns = cur_wait_all_ns;
                 prev_wait_all_cnt = cur_wait_all_cnt;
+                prev_wait_slot_ns = cur_wait_slot_ns;
+                prev_wait_slot_cnt = cur_wait_slot_cnt;
             }
         });
     }
@@ -318,7 +383,9 @@ int main(int argc, char **argv) {
     std::vector<std::thread> workers;
     workers.reserve(opts.threads);
     for (size_t i = 0; i < opts.threads; ++i) {
-        workers.emplace_back([&, i] { run_worker(i, *frontend, opts, stats); });
+        workers.emplace_back([&, i] {
+            run_worker(i, *frontend, opts, stats, slot_pool, next_file_number);
+        });
     }
     for (auto &t : workers) {
         t.join();
@@ -330,10 +397,33 @@ int main(int argc, char **argv) {
     }
 
     std::chrono::duration<double> secs = end - start;
-    uint64_t total_bytes = stats.write_bytes.load(std::memory_order_relaxed);
+    uint64_t total_bytes = static_cast<uint64_t>(opts.file_size) *
+        static_cast<uint64_t>(opts.files_per_thread) *
+        static_cast<uint64_t>(opts.threads);
     double mbps = total_bytes / (1024.0 * 1024.0) / secs.count();
+    uint64_t wait_all_ns_total = stats.wait_all_ns_total.load(std::memory_order_relaxed);
+    uint64_t wait_all_cnt = stats.wait_all_cnt.load(std::memory_order_relaxed);
+    uint64_t wait_all_ns_max = stats.wait_all_ns_max.load(std::memory_order_relaxed);
+    uint64_t wait_slot_ns_total = stats.wait_slot_ns_total.load(std::memory_order_relaxed);
+    uint64_t wait_slot_cnt = stats.wait_slot_cnt.load(std::memory_order_relaxed);
+    uint64_t wait_slot_ns_max = stats.wait_slot_ns_max.load(std::memory_order_relaxed);
+    double wait_all_avg_ms = 0.0;
+    if (wait_all_cnt > 0) {
+        wait_all_avg_ms = (wait_all_ns_total / 1e6) / wait_all_cnt;
+    }
+    double wait_slot_avg_ms = 0.0;
+    if (wait_slot_cnt > 0) {
+        wait_slot_avg_ms = (wait_slot_ns_total / 1e6) / wait_slot_cnt;
+    }
     std::cout << "total_bytes: " << total_bytes << "\n"
               << "elapsed_s: " << secs.count() << "\n"
-              << "throughput_mib_s: " << mbps << std::endl;
+              << "throughput_mib_s: " << mbps << "\n"
+              << "wait_all_avg_ms: " << wait_all_avg_ms << "\n"
+              << "wait_all_max_ms: " << (wait_all_ns_max / 1e6) << "\n"
+              << "wait_all_total_s: " << (wait_all_ns_total / 1e9) << "\n"
+              << "wait_slot_avg_ms: " << wait_slot_avg_ms << "\n"
+              << "wait_slot_max_ms: " << (wait_slot_ns_max / 1e6) << "\n"
+              << "wait_slot_total_s: " << (wait_slot_ns_total / 1e9)
+              << std::endl;
     return 0;
 }

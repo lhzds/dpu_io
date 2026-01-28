@@ -17,14 +17,30 @@ def expand_path(path):
 cfg = load_config()
 host_exe = expand_path(cfg["host_exe"])
 
-cmd = [
+
+def get_thread_values(config):
+    if "threads" not in config:
+        raise ValueError("threads must be provided as a list")
+    thread_values = config["threads"]
+    if not isinstance(thread_values, list):
+        raise ValueError("threads must be a list of integers")
+    if not thread_values:
+        raise ValueError("threads list must not be empty")
+    for value in thread_values:
+        if not isinstance(value, int) or value <= 0:
+            raise ValueError(f"invalid threads value: {value}")
+    return thread_values
+
+
+thread_values = get_thread_values(cfg)
+base_cmd = [
     host_exe,
     "-n", cfg["backend_name"],
     "-r", cfg["dev_pci"],
     "-q", str(cfg["qp_num"]),
     "-x", str(cfg["req_rb_cap"]),
     "-y", str(cfg["resp_rb_cap"]),
-    "-t", str(cfg["threads"]),
+    "--slot_pool_size", str(cfg["slot_pool_size"]),
     "-f", str(cfg["files_per_thread"]),
     "--wait_every_files", str(cfg["wait_every_files"]),
     "-s", str(cfg["file_size"]),
@@ -37,12 +53,14 @@ cmd = [
 ]
 
 if cfg.get("wait_before", False):
-    cmd.append("--wait_before")
+    base_cmd.append("--wait_before")
 if cfg.get("use_fsync", False):
-    cmd.append("--use_fsync")
+    base_cmd.append("--use_fsync")
 
 extra_args = cfg.get("extra_args", [])
 if extra_args:
-    cmd.extend(extra_args)
+    base_cmd.extend(extra_args)
 
-subprocess.run(cmd, check=True)
+for threads in thread_values:
+    cmd = base_cmd + ["-t", str(threads)]
+    subprocess.run(cmd, check=True)

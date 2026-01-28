@@ -39,7 +39,7 @@ struct Options {
     size_t start_file_number{};
 
     size_t file_size_base{};
-    int base_size_multiplier{};
+    size_t base_size_multiplier{};
 
     size_t stats_interval_ms{};
 };
@@ -152,11 +152,6 @@ Options read_args(int argc, char **argv) {
         .help("file size base (bytes)")
         .scan<'d', size_t>()
         .default_value(64 * MiB);
-    arg_parser.add_argument("-m")
-        .help("base size multiplier (0 = auto by file size base)")
-        .scan<'d', int>()
-        .default_value(0);
-
     arg_parser.add_argument("-i")
         .help("stats interval ms (0 disable)")
         .scan<'d', size_t>()
@@ -183,7 +178,6 @@ Options read_args(int argc, char **argv) {
     opts.start_file_number = arg_parser.get<size_t>("--start_file_number");
 
     opts.file_size_base = arg_parser.get<size_t>("-b");
-    opts.base_size_multiplier = arg_parser.get<int>("-m");
 
     opts.stats_interval_ms = arg_parser.get<size_t>("-i");
 
@@ -199,16 +193,13 @@ Options read_args(int argc, char **argv) {
     if (opts.slot_pool_size == 0) {
         throw_with("slot_pool_size must be > 0");
     }
-    if (opts.base_size_multiplier <= 0) {
-        if (opts.file_size_base == 0) {
-            throw_with("file_size_base must be > 0 for auto multiplier");
-        }
-        opts.base_size_multiplier = static_cast<int>(
-            (opts.file_size + opts.file_size_base - 1) / opts.file_size_base
-        );
-        if (opts.base_size_multiplier <= 0) {
-            opts.base_size_multiplier = 1;
-        }
+    if (opts.file_size_base == 0) {
+        throw_with("file_size_base must be > 0");
+    }
+    opts.base_size_multiplier =
+        (opts.file_size + opts.file_size_base - 1) / opts.file_size_base;
+    if (opts.base_size_multiplier == 0) {
+        opts.base_size_multiplier = 1;
     }
     return opts;
 }
@@ -315,7 +306,6 @@ int main(int argc, char **argv) {
               << "file_size: " << opts.file_size << "\n"
               << "write_size: " << opts.write_size << "\n"
               << "range_sync_size: " << opts.range_sync_size << "\n"
-              << "base_size_multiplier: " << opts.base_size_multiplier << "\n"
               << "wait_before: " << opts.wait_before << "\n"
               << "use_fsync: " << opts.use_fsync << std::endl;
 

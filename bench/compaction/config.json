@@ -6,17 +6,19 @@
   "qp_num": 0,
   "req_rb_cap": 67108864,
   "resp_rb_cap": 1048576,
+
   "slot_pool_size": 4000,
+  "file_size_base": 67108864,
+  "start_file_number": 1,
+
+  "file_size": 67108864,
   "files_per_thread": 1,
   "wait_every_files": 0,
-  "file_size": 268435456,
   "write_size": 2097152,
   "range_sync_size": 33554432,
   "wait_before": false,
   "use_fsync": false,
-  "start_file_number": 1,
-  "file_size_base": 67108864,
-  "base_size_multiplier": 0,
+
   "stats_interval_ms": 0,
   "extra_args": []
 }

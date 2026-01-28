@@ -12,6 +12,7 @@
 : "${DPU_DMA_TASK_SLOT_NUM:=256}"
 : "${DPU_REQ_RB_CAP:=536870912}"   # 512 MB
 : "${DPU_RESP_RB_CAP:=1048576}"    # 1 MB
+: "${STATS_INTERVAL_MS:=0}"
 
 # SST pool config (shared by host/dpu, dir differs)
 : "${DPU_SST_POOL_DIR:=/home/olh/mnt/sst_pool}"

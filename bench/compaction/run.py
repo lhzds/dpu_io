@@ -48,7 +48,6 @@ base_cmd = [
     "-g", str(cfg["range_sync_size"]),
     "--start_file_number", str(cfg["start_file_number"]),
     "-b", str(cfg["file_size_base"]),
-    "-m", str(cfg["base_size_multiplier"]),
     "-i", str(cfg["stats_interval_ms"]),
 ]
 

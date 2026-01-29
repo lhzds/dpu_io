@@ -368,19 +368,20 @@ void run_worker(size_t thread_id, Frontend &frontend, const Options &opts, Atomi
 
 int main(int argc, char **argv) {
     auto opts = read_args(argc, argv);
-    std::cout << "backend: " << opts.backend_name << "\n"
-              << "dev_pci: " << opts.dev_pci << "\n"
-              << "threads: " << opts.threads << "\n"
-              << "qp_num: " << opts.qp_num << "\n"
-              << "slot_pool_size: " << opts.slot_pool_size << "\n"
-              << "files/thread: " << opts.files_per_thread << "\n"
-              << "wait_every_files: " << opts.wait_every_files << "\n"
-              << "file_size: " << opts.file_size << "\n"
-              << "write_size: " << opts.write_size << "\n"
-              << "range_sync_size: " << opts.range_sync_size << "\n"
-              << "wait_before: " << opts.wait_before << "\n"
-              << "use_fsync: " << opts.use_fsync << "\n"
-              << "delete_batch_size: " << opts.delete_batch_size << std::endl;
+    std::cout << "[Host-Config]\n"
+              << "  backend           : " << opts.backend_name << "\n"
+              << "  dev_pci           : " << opts.dev_pci << "\n"
+              << "  threads           : " << opts.threads << "\n"
+              << "  qp_num            : " << opts.qp_num << "\n"
+              << "  slot_pool_size    : " << opts.slot_pool_size << "\n"
+              << "  files_per_thread  : " << opts.files_per_thread << "\n"
+              << "  wait_every_files  : " << opts.wait_every_files << "\n"
+              << "  file_size         : " << opts.file_size << "\n"
+              << "  write_size        : " << opts.write_size << "\n"
+              << "  range_sync_size   : " << opts.range_sync_size << "\n"
+              << "  wait_before       : " << opts.wait_before << "\n"
+              << "  use_fsync         : " << opts.use_fsync << "\n"
+              << "  delete_batch_size : " << opts.delete_batch_size << std::endl;
 
     auto frontend = std::make_unique<Frontend>(
         opts.backend_name, opts.dev_pci, static_cast<int>(opts.qp_num),
@@ -428,11 +429,11 @@ int main(int argc, char **argv) {
                 if (delta_wait_slot_cnt > 0) {
                     wait_slot_avg_ms = (delta_wait_slot_ns / 1e6) / delta_wait_slot_cnt;
                 }
-                std::cout << "[Host-Perf] "
-                          << "wait_all_avg_ms " << wait_all_avg_ms << ", "
-                          << "wait_all_max_ms " << (cur_wait_all_ns_max / 1e6) << ", "
-                          << "wait_slot_avg_ms " << wait_slot_avg_ms << ", "
-                          << "wait_slot_max_ms " << (cur_wait_slot_ns_max / 1e6)
+                std::cout << "[Host-Perf] interval_s " << secs.count() << "\n"
+                          << "  wait_all : avg_ms " << wait_all_avg_ms
+                          << ", max_ms " << (cur_wait_all_ns_max / 1e6) << "\n"
+                          << "  wait_slot: avg_ms " << wait_slot_avg_ms
+                          << ", max_ms " << (cur_wait_slot_ns_max / 1e6)
                           << std::endl;
 
                 prev_ts = now_ts;
@@ -484,15 +485,16 @@ int main(int argc, char **argv) {
     if (wait_slot_cnt > 0) {
         wait_slot_avg_ms = (wait_slot_ns_total / 1e6) / wait_slot_cnt;
     }
-    std::cout << "total_bytes: " << total_bytes << "\n"
-              << "elapsed_s: " << secs.count() << "\n"
-              << "throughput_mib_s: " << mbps << "\n"
-              << "wait_all_avg_ms: " << wait_all_avg_ms << "\n"
-              << "wait_all_max_ms: " << (wait_all_ns_max / 1e6) << "\n"
-              << "wait_all_total_s: " << (wait_all_ns_total / 1e9) << "\n"
-              << "wait_slot_avg_ms: " << wait_slot_avg_ms << "\n"
-              << "wait_slot_max_ms: " << (wait_slot_ns_max / 1e6) << "\n"
-              << "wait_slot_total_s: " << (wait_slot_ns_total / 1e9)
+    std::cout << "[Host-Summary]\n"
+              << "  total_bytes       : " << total_bytes << "\n"
+              << "  elapsed_s         : " << secs.count() << "\n"
+              << "  throughput_mib_s  : " << mbps << "\n"
+              << "  wait_all_avg_ms   : " << wait_all_avg_ms << "\n"
+              << "  wait_all_max_ms   : " << (wait_all_ns_max / 1e6) << "\n"
+              << "  wait_all_total_s  : " << (wait_all_ns_total / 1e9) << "\n"
+              << "  wait_slot_avg_ms  : " << wait_slot_avg_ms << "\n"
+              << "  wait_slot_max_ms  : " << (wait_slot_ns_max / 1e6) << "\n"
+              << "  wait_slot_total_s : " << (wait_slot_ns_total / 1e9)
               << std::endl;
     return 0;
 }

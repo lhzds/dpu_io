@@ -40,8 +40,15 @@ Backend::Backend(const std::string_view &name, const std::string_view &dev_pci,
     m_ctrl_server->set_new_conn_cb([&](doca_comch_connection *conn) {
         m_conn = conn;
     });
+    m_ctrl_server->set_disconn_cb([&](doca_comch_connection *) {
+        SPDLOG_INFO("[Backend] Connection closed, exiting...");
+        m_is_exited = true;
+    });
     m_ctrl_server->set_new_consumer_cb([&](auto *, uint32_t id) {
         m_new_consumer_id = id;
+    });
+    m_ctrl_server->set_expired_consumer_cb([&](auto *, uint32_t id) {
+        SPDLOG_INFO("[Backend] Consumer expired id={}, exiting...", id);
     });
     m_ctrl_server->set_send_cb([&](auto) {
         m_is_ctrl_msg_sended = true;

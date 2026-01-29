@@ -49,6 +49,7 @@ base_cmd = [
     "--start_file_number", str(cfg["start_file_number"]),
     "-b", str(cfg["file_size_base"]),
     "-i", str(cfg["stats_interval_ms"]),
+    "--delete_batch_size", str(cfg["delete_batch_size"]),
 ]
 
 if cfg.get("wait_before", False):

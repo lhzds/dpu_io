@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <iostream>
 #include <mutex>
+#include <queue>
 #include <string>
 #include <thread>
 #include <vector>
@@ -42,6 +43,7 @@ struct Options {
     size_t base_size_multiplier{};
 
     size_t stats_interval_ms{};
+    size_t delete_batch_size{};
 };
 
 struct AtomicStats {
@@ -83,6 +85,70 @@ private:
     std::mutex m_mu;
     std::condition_variable m_cv;
     size_t m_available{};
+};
+
+class DeleteQueue {
+public:
+    DeleteQueue(Frontend &frontend, SlotPool &slot_pool, size_t batch_size)
+        : m_frontend(frontend), m_slot_pool(slot_pool), m_batch_size(batch_size) {}
+
+    void enqueue(std::vector<size_t> file_nums) {
+        if (file_nums.empty()) {
+            return;
+        }
+        {
+            std::lock_guard<std::mutex> lock(m_mu);
+            m_queue.emplace(std::move(file_nums));
+        }
+        m_cv.notify_one();
+    }
+
+    void stop() {
+        {
+            std::lock_guard<std::mutex> lock(m_mu);
+            m_stop = true;
+        }
+        m_cv.notify_all();
+    }
+
+    void run() {
+        while (true) {
+            std::vector<size_t> file_nums;
+            {
+                std::unique_lock<std::mutex> lock(m_mu);
+                m_cv.wait(lock, [&] { return m_stop || !m_queue.empty(); });
+                if (m_stop && m_queue.empty()) {
+                    break;
+                }
+                file_nums = std::move(m_queue.front());
+                m_queue.pop();
+            }
+            process_files(file_nums);
+        }
+    }
+
+private:
+    void process_files(const std::vector<size_t> &file_nums) {
+        size_t idx = 0;
+        while (idx < file_nums.size()) {
+            size_t batch_size = std::min(m_batch_size, file_nums.size() - idx);
+            std::vector<size_t> batch;
+            batch.reserve(batch_size);
+            for (size_t i = 0; i < batch_size; ++i) {
+                batch.push_back(file_nums[idx++]);
+            }
+            m_frontend.delete_files(batch);
+            m_slot_pool.release(batch.size());
+        }
+    }
+
+    Frontend &m_frontend;
+    SlotPool &m_slot_pool;
+    size_t m_batch_size{};
+    std::mutex m_mu;
+    std::condition_variable m_cv;
+    std::queue<std::vector<size_t>> m_queue;
+    bool m_stop{};
 };
 
 Options read_args(int argc, char **argv) {
@@ -156,6 +222,10 @@ Options read_args(int argc, char **argv) {
         .help("stats interval ms (0 disable)")
         .scan<'d', size_t>()
         .default_value(0);
+    arg_parser.add_argument("--delete_batch_size")
+        .help("delete_files batch size")
+        .scan<'d', size_t>()
+        .default_value(128);
 
     arg_parser.parse_args(argc, argv);
 
@@ -180,6 +250,7 @@ Options read_args(int argc, char **argv) {
     opts.file_size_base = arg_parser.get<size_t>("-b");
 
     opts.stats_interval_ms = arg_parser.get<size_t>("-i");
+    opts.delete_batch_size = arg_parser.get<size_t>("--delete_batch_size");
 
     if (opts.qp_num == 0) {
         opts.qp_num = opts.threads;
@@ -193,6 +264,9 @@ Options read_args(int argc, char **argv) {
     if (opts.slot_pool_size == 0) {
         throw_with("slot_pool_size must be > 0");
     }
+    if (opts.delete_batch_size == 0) {
+        throw_with("delete_batch_size must be > 0");
+    }
     if (opts.file_size_base == 0) {
         throw_with("file_size_base must be > 0");
     }
@@ -205,7 +279,7 @@ Options read_args(int argc, char **argv) {
 }
 
 void run_worker(size_t thread_id, Frontend &frontend, const Options &opts, AtomicStats &stats,
-                SlotPool &slot_pool, std::atomic<size_t> &next_file_number) {
+                SlotPool &slot_pool, DeleteQueue &deleter, std::atomic<size_t> &next_file_number) {
     auto *qp = frontend.alloc_qp();
 
     std::string payload(opts.write_size, static_cast<char>('a' + (thread_id % 26)));
@@ -261,8 +335,7 @@ void run_worker(size_t thread_id, Frontend &frontend, const Options &opts, Atomi
                 for (const auto &item : file_map) {
                     file_nums.push_back(item.first);
                 }
-                frontend.delete_files(file_nums);
-                slot_pool.release(file_nums.size());
+                deleter.enqueue(std::move(file_nums));
             }
             inflight_files = 0;
         }
@@ -286,8 +359,7 @@ void run_worker(size_t thread_id, Frontend &frontend, const Options &opts, Atomi
             for (const auto &item : file_map) {
                 file_nums.push_back(item.first);
             }
-            frontend.delete_files(file_nums);
-            slot_pool.release(file_nums.size());
+            deleter.enqueue(std::move(file_nums));
         }
     }
     frontend.free_qp(qp);
@@ -307,7 +379,8 @@ int main(int argc, char **argv) {
               << "write_size: " << opts.write_size << "\n"
               << "range_sync_size: " << opts.range_sync_size << "\n"
               << "wait_before: " << opts.wait_before << "\n"
-              << "use_fsync: " << opts.use_fsync << std::endl;
+              << "use_fsync: " << opts.use_fsync << "\n"
+              << "delete_batch_size: " << opts.delete_batch_size << std::endl;
 
     auto frontend = std::make_unique<Frontend>(
         opts.backend_name, opts.dev_pci, static_cast<int>(opts.qp_num),
@@ -316,9 +389,11 @@ int main(int argc, char **argv) {
 
     AtomicStats stats;
     SlotPool slot_pool(opts.slot_pool_size);
+    DeleteQueue deleter(*frontend, slot_pool, opts.delete_batch_size);
     std::atomic<size_t> next_file_number{opts.start_file_number};
     std::atomic<bool> stop_stats{};
     std::thread stats_thread;
+    std::thread delete_thread([&] { deleter.run(); });
     if (opts.stats_interval_ms > 0) {
         auto prev_ts = std::chrono::steady_clock::now();
         uint64_t prev_wait_all_ns = 0;
@@ -374,11 +449,15 @@ int main(int argc, char **argv) {
     workers.reserve(opts.threads);
     for (size_t i = 0; i < opts.threads; ++i) {
         workers.emplace_back([&, i] {
-            run_worker(i, *frontend, opts, stats, slot_pool, next_file_number);
+            run_worker(i, *frontend, opts, stats, slot_pool, deleter, next_file_number);
         });
     }
     for (auto &t : workers) {
         t.join();
+    }
+    deleter.stop();
+    if (delete_thread.joinable()) {
+        delete_thread.join();
     }
     auto end = std::chrono::steady_clock::now();
     stop_stats.store(true, std::memory_order_relaxed);

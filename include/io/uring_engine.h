@@ -28,6 +28,15 @@ public:
         uint64_t sync_close_ops{};
         uint64_t uring_cqe_backlog{};
         uint64_t cq_backlog{};
+        uint64_t write_ns_total{};
+        uint64_t write_cnt{};
+        uint64_t write_ns_max{};
+        uint64_t range_sync_ns_total{};
+        uint64_t range_sync_cnt{};
+        uint64_t range_sync_ns_max{};
+        uint64_t sync_close_ns_total{};
+        uint64_t sync_close_cnt{};
+        uint64_t sync_close_ns_max{};
         uint64_t sync_close_wait_ns_total{};
         uint64_t sync_close_wait_cnt{};
         uint64_t sync_close_wait_ns_max{};
@@ -60,6 +69,15 @@ public:
             m_stats_sync_close_ops.load(std::memory_order_relaxed),
             static_cast<uint64_t>(m_uring_cqe_cnt.load(std::memory_order_relaxed)),
             m_stats_cq_size.load(std::memory_order_relaxed),
+            m_stats_write_ns_total.load(std::memory_order_relaxed),
+            m_stats_write_cnt.load(std::memory_order_relaxed),
+            m_stats_write_ns_max.load(std::memory_order_relaxed),
+            m_stats_range_sync_ns_total.load(std::memory_order_relaxed),
+            m_stats_range_sync_cnt.load(std::memory_order_relaxed),
+            m_stats_range_sync_ns_max.load(std::memory_order_relaxed),
+            m_stats_sync_close_ns_total.load(std::memory_order_relaxed),
+            m_stats_sync_close_cnt.load(std::memory_order_relaxed),
+            m_stats_sync_close_ns_max.load(std::memory_order_relaxed),
             m_stats_sync_close_wait_ns_total.load(std::memory_order_relaxed),
             m_stats_sync_close_wait_cnt.load(std::memory_order_relaxed),
             m_stats_sync_close_wait_ns_max.load(std::memory_order_relaxed)
@@ -72,6 +90,15 @@ public:
         m_stats_range_sync_ops.store(0, std::memory_order_relaxed);
         m_stats_sync_close_ops.store(0, std::memory_order_relaxed);
         m_stats_cq_size.store(0, std::memory_order_relaxed);
+        m_stats_write_ns_total.store(0, std::memory_order_relaxed);
+        m_stats_write_cnt.store(0, std::memory_order_relaxed);
+        m_stats_write_ns_max.store(0, std::memory_order_relaxed);
+        m_stats_range_sync_ns_total.store(0, std::memory_order_relaxed);
+        m_stats_range_sync_cnt.store(0, std::memory_order_relaxed);
+        m_stats_range_sync_ns_max.store(0, std::memory_order_relaxed);
+        m_stats_sync_close_ns_total.store(0, std::memory_order_relaxed);
+        m_stats_sync_close_cnt.store(0, std::memory_order_relaxed);
+        m_stats_sync_close_ns_max.store(0, std::memory_order_relaxed);
         m_stats_sync_close_wait_ns_total.store(0, std::memory_order_relaxed);
         m_stats_sync_close_wait_cnt.store(0, std::memory_order_relaxed);
         m_stats_sync_close_wait_ns_max.store(0, std::memory_order_relaxed);
@@ -94,6 +121,7 @@ public:
         io_data->op = Op::kWrite;
         io_data->ctx = ctx;
         io_data->cb = cb;
+        io_data->submit_ts = std::chrono::steady_clock::now();
         issue_write(ctx->os_fd, offset, src, io_data);
     }
 
@@ -108,6 +136,7 @@ public:
         io_data->op = Op::kRangeSync;
         io_data->ctx = ctx;
         io_data->cb = cb;
+        io_data->submit_ts = std::chrono::steady_clock::now();
         issue_range_sync(ctx->os_fd, offset, size, wait_before, io_data);
     }
 
@@ -136,6 +165,8 @@ public:
             --ctx->write_cnt;
             m_stats_write_bytes.fetch_add(static_cast<uint64_t>(io_data->res), std::memory_order_relaxed);
             m_stats_write_ops.fetch_add(1, std::memory_order_relaxed);
+            record_latency(io_data->submit_ts, m_stats_write_ns_total,
+                m_stats_write_cnt, m_stats_write_ns_max);
             try_issue_sync_close(ctx);
             if (io_data->cb != nullptr) {
                 io_data->cb->operator()(file_number, io_data->res);
@@ -143,6 +174,8 @@ public:
         } else if (io_data->op == Op::kRangeSync) {
             --ctx->range_sync_cnt;
             m_stats_range_sync_ops.fetch_add(1, std::memory_order_relaxed);
+            record_latency(io_data->submit_ts, m_stats_range_sync_ns_total,
+                m_stats_range_sync_cnt, m_stats_range_sync_ns_max);
             try_issue_sync_close(ctx);
             if (io_data->cb != nullptr) {
                 io_data->cb->operator()(file_number, io_data->res);
@@ -152,6 +185,11 @@ public:
             auto &sync_close_ctx = io_data->ctx->sync_close_ctx;
             if ((++sync_close_ctx.seen_cqe_cnt) == 2) {
                 m_stats_sync_close_ops.fetch_add(1, std::memory_order_relaxed);
+                if (sync_close_ctx.issue_started) {
+                    record_latency(sync_close_ctx.issue_ts, m_stats_sync_close_ns_total,
+                        m_stats_sync_close_cnt, m_stats_sync_close_ns_max);
+                    sync_close_ctx.issue_started = false;
+                }
                 io_data->res = ctx->slot_id;
                 m_writing_files.erase(file_number);
                 if (sync_close_ctx.cb != nullptr) {
@@ -175,6 +213,24 @@ public:
     }
 
 private:    
+    void record_latency(const std::chrono::steady_clock::time_point &start_ts,
+        std::atomic<uint64_t> &total,
+        std::atomic<uint64_t> &cnt,
+        std::atomic<uint64_t> &max) {
+        auto end_ts = std::chrono::steady_clock::now();
+        auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(end_ts - start_ts).count();
+        if (ns <= 0) {
+            return;
+        }
+        total.fetch_add(static_cast<uint64_t>(ns), std::memory_order_relaxed);
+        cnt.fetch_add(1, std::memory_order_relaxed);
+        auto prev_max = max.load(std::memory_order_relaxed);
+        while (ns > static_cast<int64_t>(prev_max) &&
+               !max.compare_exchange_weak(
+                   prev_max, static_cast<uint64_t>(ns), std::memory_order_relaxed)) {
+        }
+    }
+
     struct FileCtx{
         size_t file_number{}; // 从 1 开始
         int slot_id{-1}; // 从 0 开始
@@ -193,6 +249,8 @@ private:
             CallbackFn *cb{};
             bool wait_started{};
             std::chrono::steady_clock::time_point wait_start_ts{};
+            bool issue_started{};
+            std::chrono::steady_clock::time_point issue_ts{};
         } sync_close_ctx{};
     };
     struct IoData {
@@ -201,6 +259,7 @@ private:
         FileCtx *ctx{};
         CallbackFn *cb{};
         iovec iovs[2]{};
+        std::chrono::steady_clock::time_point submit_ts{};
     };
     using CompleteQueue = boost::lockfree::spsc_queue<IoData *,
         boost::lockfree::capacity<kIoEngineCqDepth>>;
@@ -286,6 +345,8 @@ private:
         if (ctx->in_flight_ops() == 0) {
             SPDLOG_INFO("[Io-Engine] Issue request[SyncClose: file_number={}]",
                 ctx->file_number);
+            sync_close_ctx.issue_started = true;
+            sync_close_ctx.issue_ts = std::chrono::steady_clock::now();
             if (sync_close_ctx.wait_started) {
                 auto now_ts = std::chrono::steady_clock::now();
                 auto wait_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -379,6 +440,15 @@ private:
     std::atomic<uint64_t> m_stats_range_sync_ops{};
     std::atomic<uint64_t> m_stats_sync_close_ops{};
     std::atomic<uint64_t> m_stats_cq_size{};
+    std::atomic<uint64_t> m_stats_write_ns_total{};
+    std::atomic<uint64_t> m_stats_write_cnt{};
+    std::atomic<uint64_t> m_stats_write_ns_max{};
+    std::atomic<uint64_t> m_stats_range_sync_ns_total{};
+    std::atomic<uint64_t> m_stats_range_sync_cnt{};
+    std::atomic<uint64_t> m_stats_range_sync_ns_max{};
+    std::atomic<uint64_t> m_stats_sync_close_ns_total{};
+    std::atomic<uint64_t> m_stats_sync_close_cnt{};
+    std::atomic<uint64_t> m_stats_sync_close_ns_max{};
     std::atomic<uint64_t> m_stats_sync_close_wait_ns_total{};
     std::atomic<uint64_t> m_stats_sync_close_wait_cnt{};
     std::atomic<uint64_t> m_stats_sync_close_wait_ns_max{};

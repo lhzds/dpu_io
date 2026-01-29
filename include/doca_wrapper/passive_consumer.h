@@ -30,9 +30,12 @@ public:
                 buf->clear_doca_buf_data();
             }
             
+
             auto ret = m_consumer->submit(std::move(task));
             if (ret != nullptr) {
-                throw_with("PassiveConsumer: ReSubmit failed");
+                throw_with("PassiveConsumer: Resubmit post_recv task failed");
+            } else {
+                SPDLOG_INFO("[Passive-Consumer] Resubmit post_recv task");
             }
         });
         m_consumer->set_post_recv_error_cb([](auto task) {

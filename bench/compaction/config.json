@@ -1,10 +1,10 @@
 {
-  "host_exe": "~/pulsedb/build/linux/x86_64/release/bench_compaction_host",
+  "host_exe": "~/dpu_io/build/linux/x86_64/release/bench_compaction_host",
   "backend_name": "backend",
-  "dev_pci": "b1:00.0",
-  "threads": [1, 2, 4, 8],
+  "dev_pci": "b1:00.1",
+  "threads": [4],
   "qp_num": 0,
-  "req_rb_cap": 67108864,
+  "req_rb_cap": 536870912,
   "resp_rb_cap": 1048576,
 
   "slot_pool_size": 4000,
@@ -12,13 +12,14 @@
   "start_file_number": 1,
 
   "file_size": 67108864,
-  "files_per_thread": 1,
-  "wait_every_files": 0,
-  "write_size": 2097152,
-  "range_sync_size": 33554432,
+  "files_per_thread": 800,
+  "wait_every_files": 50,
+  "write_size": 1048576,
+  "range_sync_size": 4194304,
   "wait_before": false,
   "use_fsync": false,
 
+  "delete_batch_size": 128,
   "stats_interval_ms": 0,
   "extra_args": []
 }

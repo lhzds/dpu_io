@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <doca_dev.h>
 #include <doca_types.h>
 #include <functional>
@@ -28,6 +29,9 @@ public:
         uint64_t total_tasks{};
         uint64_t inflight_tasks{};
         uint64_t queued_tasks{};
+        uint64_t memcpy_ns_total{};
+        uint64_t memcpy_cnt{};
+        uint64_t memcpy_ns_max{};
     };
 
     QueueDma(doca_pe *pe, doca_dev *dev, size_t memcpy_task_slot_num)
@@ -41,7 +45,10 @@ public:
             m_stats_total_bytes.load(std::memory_order_relaxed),
             m_stats_total_tasks.load(std::memory_order_relaxed),
             m_stats_inflight_tasks.load(std::memory_order_relaxed),
-            m_stats_queued_tasks.load(std::memory_order_relaxed)
+            m_stats_queued_tasks.load(std::memory_order_relaxed),
+            m_stats_memcpy_ns_total.load(std::memory_order_relaxed),
+            m_stats_memcpy_cnt.load(std::memory_order_relaxed),
+            m_stats_memcpy_ns_max.load(std::memory_order_relaxed)
         };
     }
 
@@ -50,6 +57,9 @@ public:
         m_stats_total_tasks.store(0, std::memory_order_relaxed);
         m_stats_inflight_tasks.store(0, std::memory_order_relaxed);
         m_stats_queued_tasks.store(0, std::memory_order_relaxed);
+        m_stats_memcpy_ns_total.store(0, std::memory_order_relaxed);
+        m_stats_memcpy_cnt.store(0, std::memory_order_relaxed);
+        m_stats_memcpy_ns_max.store(0, std::memory_order_relaxed);
     }
 
     void post_memcpy(docacxx::Mmap &src_mmap, size_t src_offset, docacxx::Mmap &dst_mmap, 
@@ -71,16 +81,30 @@ public:
                         m_stats_queued_tasks.fetch_add(-1, std::memory_order_relaxed);
                     }
                     m_stats_inflight_tasks.fetch_add(1, std::memory_order_relaxed);
+                    auto start_ts = std::chrono::steady_clock::now();
                     auto src = m_buf_inv.get_buf(src_mmap, src_offset + part_offset, part_size).release();
                     src->set_doca_buf_data(part_size);
                     auto dst = m_buf_inv.get_buf(dst_mmap, dst_offset + part_offset, part_size).release();
 
-                    auto task = alloc_memcpy_task(*src, *dst, [this, src, dst, shared_cb, part_size](const MemcpyTask &) {
+                    auto task = alloc_memcpy_task(*src, *dst,
+                        [this, src, dst, shared_cb, part_size, start_ts](const MemcpyTask &) {
                         delete src;
                         delete dst;
                         m_stats_total_bytes.fetch_add(part_size, std::memory_order_relaxed);
                         m_stats_total_tasks.fetch_add(1, std::memory_order_relaxed);
                         m_stats_inflight_tasks.fetch_add(-1, std::memory_order_relaxed);
+                        auto end_ts = std::chrono::steady_clock::now();
+                        auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(end_ts - start_ts).count();
+                        if (ns > 0) {
+                            m_stats_memcpy_ns_total.fetch_add(
+                                static_cast<uint64_t>(ns), std::memory_order_relaxed);
+                            m_stats_memcpy_cnt.fetch_add(1, std::memory_order_relaxed);
+                            auto prev_max = m_stats_memcpy_ns_max.load(std::memory_order_relaxed);
+                            while (ns > static_cast<int64_t>(prev_max) &&
+                                   !m_stats_memcpy_ns_max.compare_exchange_weak(
+                                       prev_max, static_cast<uint64_t>(ns), std::memory_order_relaxed)) {
+                            }
+                        }
                         if (shared_cb.use_count() == 1) {
                             shared_cb->operator()();
                         }
@@ -104,15 +128,29 @@ public:
                 m_stats_queued_tasks.fetch_add(-1, std::memory_order_relaxed);
             }
             m_stats_inflight_tasks.fetch_add(1, std::memory_order_relaxed);
+            auto start_ts = std::chrono::steady_clock::now();
             auto src = m_buf_inv.get_buf(src_mmap, src_offset, size).release();
             src->set_doca_buf_data(size);
             auto dst = m_buf_inv.get_buf(dst_mmap, dst_offset, size).release();
-            auto task = alloc_memcpy_task(*src, *dst, [this, src, dst, size, cb = std::move(cb)](const MemcpyTask &) {
+            auto task = alloc_memcpy_task(*src, *dst,
+                [this, src, dst, size, cb = std::move(cb), start_ts](const MemcpyTask &) {
                 delete src;
                 delete dst;
                 m_stats_total_bytes.fetch_add(size, std::memory_order_relaxed);
                 m_stats_total_tasks.fetch_add(1, std::memory_order_relaxed);
                 m_stats_inflight_tasks.fetch_add(-1, std::memory_order_relaxed);
+                auto end_ts = std::chrono::steady_clock::now();
+                auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(end_ts - start_ts).count();
+                if (ns > 0) {
+                    m_stats_memcpy_ns_total.fetch_add(
+                        static_cast<uint64_t>(ns), std::memory_order_relaxed);
+                    m_stats_memcpy_cnt.fetch_add(1, std::memory_order_relaxed);
+                    auto prev_max = m_stats_memcpy_ns_max.load(std::memory_order_relaxed);
+                    while (ns > static_cast<int64_t>(prev_max) &&
+                           !m_stats_memcpy_ns_max.compare_exchange_weak(
+                               prev_max, static_cast<uint64_t>(ns), std::memory_order_relaxed)) {
+                    }
+                }
                 cb();
             });
             auto ret = submit(std::move(task));
@@ -148,5 +186,8 @@ private:
     std::atomic<uint64_t> m_stats_total_tasks{};
     std::atomic<uint64_t> m_stats_inflight_tasks{};
     std::atomic<uint64_t> m_stats_queued_tasks{};
+    std::atomic<uint64_t> m_stats_memcpy_ns_total{};
+    std::atomic<uint64_t> m_stats_memcpy_cnt{};
+    std::atomic<uint64_t> m_stats_memcpy_ns_max{};
 };
 }

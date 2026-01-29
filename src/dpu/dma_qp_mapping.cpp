@@ -138,7 +138,9 @@ DmaQpMapping::~DmaQpMapping() {
 
 void DmaQpMapping::create_consumer(Backend &backend) {
     PassiveConsumer::Cfg cfg;
-    cfg.post_recv_task_slot_num = 1; // 设计上同步传输，目前只需分配一个 task slot
+    // 尽管同步传输，但 task slot 数仍需大于 1
+    // 以防止单个 post_recv 任务准备过慢，导致对端 resubmit send_task 次数过多
+    cfg.post_recv_task_slot_num = 5;
     cfg.max_msg_size = kCommRbMetaSize;
     m_consumer = std::make_unique<PassiveConsumer>(
         backend.conn(), backend.pe(), backend.pe(),

@@ -47,7 +47,9 @@ void FrontendQp::create_producer(Frontend &frontend) {
 void FrontendQp::create_consumer(Frontend &frontend) {
     PassiveConsumer::Cfg cfg;
     cfg.max_msg_size = kCommRbMetaSize;
-    cfg.post_recv_task_slot_num = 1;
+    // 尽管同步传输，但 task slot 数仍需大于 1
+    // 以防止单个 post_recv 任务准备过慢，导致对端 resubmit send_task 次数过多
+    cfg.post_recv_task_slot_num = 5;
     m_consumer = std::make_unique<PassiveConsumer>(frontend.conn(), m_pe,
         frontend.pe(), frontend.dev(), cfg, [&](const auto &view) {
         auto *msg = (D2HRbMetaMsg *)view.data();

@@ -1,0 +1,39 @@
+{
+  "fio_bin": "fio",
+  "mode": "file",
+  "run_id": "auto",
+  "threads": [2],
+  "queue_depth": 1024,
+  "write_size": 524288,
+  "rw": "write",
+  "ioengine": "io_uring",
+  "direct": true,
+  "group_reporting": true,
+  "time_based": true,
+  "runtime_sec": 60,
+  "output_dir": "./output",
+  "output_format": "normal",
+  "job_name": "fio_write",
+  "extra_args": [],
+  "file": {
+    "directory": "/home/olh/mnt/sst_pool",
+    "files_per_thread": 150,
+    "file_size": 67108864,
+    "sync_close": false,
+    "fsync": false,
+    "fdatasync": false,
+    "sync_file_range": null
+  },
+  "device": {
+    "filename": "/dev/nvme1n1p1",
+    "size": 10737418240,
+    "offset_increment": 10737418240
+  },
+  "uring": {
+    "fixedbufs": false,
+    "registerfiles": true,
+    "sqthread_poll": true,
+    "sqthread_poll_cpu": 8,
+    "hipri": false
+  }
+}

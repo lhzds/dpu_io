@@ -25,9 +25,10 @@
 
 # IB configuration
 : "${HOST_IB_DEV:=ibs21f1}"
-: "${HOST_IB_ADDR:=192.168.1.20/24}"
+: "${HOST_IB_ADDR:=192.168.1.20}"
 : "${DPU_IB_DEV:=ib1}"
-: "${DPU_IB_ADDR:=192.168.1.21/24}"
+: "${DPU_IB_ADDR:=192.168.1.21}"
+: "${IB_PREFIX_LEN:=24}"
 
 # NVMe-oF config (host setup + dpu connect)
 : "${NVMEOF_PORT_NAME:=1}"

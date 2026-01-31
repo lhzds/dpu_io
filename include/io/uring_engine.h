@@ -190,10 +190,12 @@ public:
                         m_stats_sync_close_cnt, m_stats_sync_close_ns_max);
                     sync_close_ctx.issue_started = false;
                 }
+                auto *cb = sync_close_ctx.cb;
+                sync_close_ctx.cb = nullptr;
                 io_data->res = ctx->slot_id;
                 m_writing_files.erase(file_number);
-                if (sync_close_ctx.cb != nullptr) {
-                    sync_close_ctx.cb->operator()(file_number, io_data->res);
+                if (cb != nullptr) {
+                    cb->operator()(file_number, io_data->res);
                 }
             }
         } else {

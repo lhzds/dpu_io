@@ -1,0 +1,24 @@
+{
+    "host_exe": "~/dpu_io/build/linux/arm64/release/bench_uring_host",
+    "sst_dir": "/home/olh/mnt/sst_pool",
+    "base_pool_size": 4000,
+    "big_pool_cnt": 0,
+    "big_pool_size": 0,
+    "file_size_base": 67108864,
+    "sst_pad_len": 1048576,
+    "create_ssts": false,
+    "queue_depth": 2048,
+    "threads": [2],
+    "files_per_thread": 800,
+    "file_size": 67108864,
+    "write_size": 1048576,
+    "range_sync_size": 4194304,
+    "wait_before": false,
+    "use_fsync": false,
+    "start_file_number": 1,
+    "stats_interval_ms": 0,
+    "delete_after_sync": true,
+    "delete_batch_size": 128,
+    "extra_args": []
+}
+  

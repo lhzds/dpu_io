@@ -38,7 +38,7 @@
 : "${NVMEOF_IP_ADDR:=${HOST_IB_ADDR}}"
 
 # Host disk partitions + mount points
-: "${HOST_DEV:=/dev/nvme3n1}"
+: "${HOST_DEV:=/dev/nvme0n1}"
 : "${HOST_DB_DEV:=${HOST_DEV}p1}"
 : "${HOST_DB_MNT:=/home/olh/mnt/local/db}"
 : "${HOST_SST_DEV:=${HOST_DEV}p2}"

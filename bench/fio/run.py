@@ -131,8 +131,15 @@ group_reporting = bool(cfg.get("group_reporting", True))
 time_based = bool(cfg.get("time_based", False))
 runtime_sec = cfg.get("runtime_sec")
 sync_close = bool(file_cfg.get("sync_close", False)) if not use_device else False
-fsync = bool(file_cfg.get("fsync", False)) if not use_device else False
-fdatasync = bool(file_cfg.get("fdatasync", False)) if not use_device else False
+def _parse_sync_value(value):
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return 1 if value else None
+    return int(value)
+
+fsync = _parse_sync_value(file_cfg.get("fsync", None)) if not use_device else None
+fdatasync = _parse_sync_value(file_cfg.get("fdatasync", None)) if not use_device else None
 sync_file_range = file_cfg.get("sync_file_range") if not use_device else None
 fixedbufs = bool(uring_cfg.get("fixedbufs", False)) if use_uring else False
 registerfiles = bool(uring_cfg.get("registerfiles", False)) if use_uring else False
@@ -183,9 +190,9 @@ else:
 if sync_close:
     global_lines.append("fsync_on_close=1")
 if fsync:
-    global_lines.append("fsync=1")
+    global_lines.append(f"fsync={fsync}")
 if fdatasync:
-    global_lines.append("fdatasync=1")
+    global_lines.append(f"fdatasync={fdatasync}")
 if sync_file_range:
     global_lines.append(f"sync_file_range={sync_file_range}")
 if fixedbufs:

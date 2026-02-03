@@ -4,6 +4,7 @@
 #include <chrono>
 #include <bits/types/struct_iovec.h>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <fcntl.h>
 #include <iostream>
@@ -104,16 +105,26 @@ public:
         m_stats_sync_close_wait_ns_max.store(0, std::memory_order_relaxed);
     }
 
+    static constexpr size_t direct_alignment() noexcept {
+        return kDirectAlignment;
+    }
+
     void write_async(size_t file_number, size_t offset, int base_size_multiplier,
-        const RingBuffer::View &src, CallbackFn *cb) override {
+        const RingBuffer::View &src, CallbackFn *cb, bool direct_if_open) override {
         SPDLOG_INFO("[Io-Engine] Issue request[Write: file_number={}, offset={}, size={}]",
             file_number, offset, src.size());
         FileCtx *ctx{};
         auto iter = m_writing_files.find(file_number);
         if (iter == m_writing_files.end()) {
-            ctx = init_file_ctx(file_number, base_size_multiplier);
+            ctx = init_file_ctx(file_number, base_size_multiplier, direct_if_open);
         } else {
             ctx = iter->second.get();
+        }
+        if (ctx->is_direct != direct_if_open) {
+            throw_with("UringEngine: Mixed direct mode on file_number={}", file_number);
+        }
+        if (ctx->is_direct) {
+            validate_direct_write(offset, src);
         }
 
         ++ctx->write_cnt;
@@ -130,6 +141,13 @@ public:
         auto iter = m_writing_files.find(file_number);
         assert(iter != m_writing_files.end()); // write 最先提交，ctx 必然已被创建
         FileCtx *ctx = iter->second.get();
+        if (ctx->is_direct) {
+            if (cb != nullptr) {
+                // 回调函数由调用线程执行，直接返回
+                cb->operator()(file_number, 0);
+            }
+            return;
+        }
 
         ++ctx->range_sync_cnt;
         auto *io_data = new IoData;
@@ -147,7 +165,11 @@ public:
 
         auto &sync_close_ctx = ctx->sync_close_ctx;
         sync_close_ctx.is_valid = true;
-        sync_close_ctx.use_fsync = use_fsync;
+        if (ctx->is_direct) {
+            sync_close_ctx.use_fsync = true; // force fsync for durability
+        } else {
+            sync_close_ctx.use_fsync = use_fsync;
+        }
         sync_close_ctx.cb = cb;
         try_issue_sync_close(ctx);
     }
@@ -237,6 +259,7 @@ private:
         size_t file_number{}; // 从 1 开始
         int slot_id{-1}; // 从 0 开始
         int os_fd{-1};
+        bool is_direct{};
         int write_cnt{};
         int range_sync_cnt{};
 
@@ -266,9 +289,10 @@ private:
     using CompleteQueue = boost::lockfree::spsc_queue<IoData *,
         boost::lockfree::capacity<kIoEngineCqDepth>>;
 
-    FileCtx *init_file_ctx(size_t file_number, int base_size_multiplier) {
+    FileCtx *init_file_ctx(size_t file_number, int base_size_multiplier, bool direct_if_open) {
         auto ctx = std::make_unique<FileCtx>();
         ctx->file_number = file_number;
+        ctx->is_direct = direct_if_open;
 
         auto slot_id = m_sst_pool->alloc_slot(file_number, base_size_multiplier);
         if (not slot_id.has_value()) {
@@ -277,7 +301,11 @@ private:
         ctx->slot_id = *slot_id;
 
         auto sst_name = m_sst_pool->slot_file_name(*slot_id);
-        ctx->os_fd = open(sst_name.c_str(), O_WRONLY);
+        int open_flags = O_WRONLY;
+        if (direct_if_open) {
+            open_flags |= O_DIRECT;
+        }
+        ctx->os_fd = open(sst_name.c_str(), open_flags);
         if (ctx->os_fd < 0) {
             throw_with("UringEngine: Failed to open {}: {}", sst_name, strerror(errno));
         }
@@ -458,6 +486,42 @@ private:
     io_uring *m_uring{};
     std::unique_ptr<SstPool> m_sst_pool;
     std::unordered_map<size_t, std::unique_ptr<FileCtx>> m_writing_files;
+
+    static constexpr size_t kDirectAlignment = 4096;
+
+    static bool is_aligned_size(size_t value) {
+        return (value % kDirectAlignment) == 0;
+    }
+
+    static bool is_aligned_ptr(const void *ptr) {
+        return (reinterpret_cast<uintptr_t>(ptr) % kDirectAlignment) == 0;
+    }
+
+    static void validate_direct_write(size_t offset, const RingBuffer::View &src) {
+        if (!is_aligned_size(offset)) {
+            throw_with("UringEngine: Direct write offset not aligned: {}", offset);
+        }
+        const auto &first = src.first_part();
+        if (first.size() > 0) {
+            if (!is_aligned_ptr(first.data())) {
+                throw_with("UringEngine: Direct write buffer not aligned");
+            }
+            if (!is_aligned_size(first.size())) {
+                throw_with("UringEngine: Direct write buffer size not aligned");
+            }
+        }
+        if (src.second_part().has_value()) {
+            const auto &second = *src.second_part();
+            if (second.size() > 0) {
+                if (!is_aligned_ptr(second.data())) {
+                    throw_with("UringEngine: Direct write buffer not aligned");
+                }
+                if (!is_aligned_size(second.size())) {
+                    throw_with("UringEngine: Direct write buffer size not aligned");
+                }
+            }
+        }
+    }
 };
 
 } // namespace pulsedb

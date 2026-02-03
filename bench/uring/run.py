@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -12,6 +13,42 @@ def load_config():
 
 def expand_path(path):
     return os.path.expanduser(path)
+
+
+def resolve_path(path):
+    expanded = expand_path(path)
+    if os.path.isabs(expanded):
+        return expanded
+    return str(Path(__file__).parent / expanded)
+
+
+def next_run_id(output_dir, job_name):
+    if not output_dir.exists():
+        return 1
+    pattern = re.compile(rf"^{re.escape(job_name)}_run(\d+)_t\d+\.log$")
+    max_id = 0
+    for entry in output_dir.iterdir():
+        if not entry.is_file():
+            continue
+        match = pattern.match(entry.name)
+        if match:
+            max_id = max(max_id, int(match.group(1)))
+    return max_id + 1 if max_id > 0 else 1
+
+
+def parse_run_id(value, output_dir, job_name):
+    if value is None:
+        return None
+    if isinstance(value, int):
+        if value <= 0:
+            raise ValueError("run_id must be > 0")
+        return value
+    if isinstance(value, str):
+        if value.lower() == "auto":
+            return next_run_id(output_dir, job_name)
+        if value.isdigit():
+            return int(value)
+    raise ValueError("run_id must be an integer, 'auto', or null")
 
 
 cfg = load_config()
@@ -33,6 +70,12 @@ def get_thread_values(config):
 
 
 thread_values = get_thread_values(cfg)
+output_dir = resolve_path(cfg.get("output_dir", "./output"))
+os.makedirs(output_dir, exist_ok=True)
+output_dir_path = Path(output_dir)
+job_name = cfg.get("job_name", "uring")
+run_id = parse_run_id(cfg.get("run_id"), output_dir_path, job_name)
+name_prefix = f"{job_name}_run{run_id}" if run_id is not None else job_name
 base_cmd = [
     host_exe,
     "--sst_dir", expand_path(cfg["sst_dir"]),
@@ -48,6 +91,8 @@ base_cmd = [
     "-g", str(cfg["range_sync_size"]),
     "--start_file_number", str(cfg["start_file_number"]),
     "--stats_interval_ms", str(cfg["stats_interval_ms"]),
+    "--progress_interval_ms", str(cfg.get("progress_interval_ms", 0)),
+    "--pacing_mbps", str(cfg.get("pacing_mbps", 0)),
     "--delete_batch_size", str(cfg["delete_batch_size"]),
 ]
 
@@ -55,6 +100,8 @@ if cfg.get("wait_before", False):
     base_cmd.append("--wait_before")
 if cfg.get("use_fsync", False):
     base_cmd.append("--use_fsync")
+if cfg.get("direct", False):
+    base_cmd.append("--direct")
 if cfg.get("create_ssts", False):
     base_cmd.append("--create_ssts")
 if cfg.get("delete_after_sync", True):
@@ -66,4 +113,6 @@ if extra_args:
 
 for threads in thread_values:
     cmd = base_cmd + ["-t", str(threads)]
-    subprocess.run(cmd, check=True)
+    output_path = output_dir_path / f"{name_prefix}_t{threads}.log"
+    with output_path.open("w", encoding="utf-8") as log_file:
+        subprocess.run(cmd, check=True, stdout=log_file)

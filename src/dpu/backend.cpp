@@ -232,8 +232,8 @@ void Backend::submit_request_to_io_engine(int qp_id, ReqRbMapping::DpuRbView &re
                     // m_qps[qp_id]->finish_req(req_view, std::move(msg));
                     m_qps[qp_id]->finish_req(req_view);
             });
-            m_io_ctx->write_async(header.file_number, header.offset, 
-                header.base_size_multiplier, *write_ref->content, cb);
+            m_io_ctx->write_async(header.file_number, header.offset,
+                header.base_size_multiplier, *write_ref->content, cb, false);
             break;
         }
         case IoReqMsg::Type::kRangeSync: {

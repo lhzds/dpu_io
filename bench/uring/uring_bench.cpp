@@ -1,8 +1,12 @@
 #include <argparse/argparse.hpp>
 #include <atomic>
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
+#include <cstdlib>
+#include <cstring>
+#include <iomanip>
 #include <iostream>
 #include <mutex>
 #include <boost/lockfree/queue.hpp>
@@ -38,8 +42,11 @@ struct Options {
     size_t range_sync_size{};
     bool wait_before{};
     bool use_fsync{};
+    bool direct{};
     size_t start_file_number{};
     size_t stats_interval_ms{};
+    size_t progress_interval_ms{};
+    size_t pacing_mbps{};
 
     bool delete_after_sync{};
     size_t delete_batch_size{};
@@ -50,8 +57,7 @@ struct Options {
 enum class TaskType {
     kWrite,
     kRangeSync,
-    kSyncClose,
-    kDelete
+    kSyncClose
 };
 
 struct Task {
@@ -61,7 +67,48 @@ struct Task {
     size_t size{};
     bool wait_before{};
     bool use_fsync{};
-    BytesBuffer *payload{};
+    const BytesView *payload{};
+};
+
+class AlignedBuffer {
+public:
+    AlignedBuffer() = default;
+    explicit AlignedBuffer(size_t size, size_t alignment) : m_size(size) {
+        if (size == 0) {
+            return;
+        }
+        void *ptr = nullptr;
+        int ret = posix_memalign(&ptr, alignment, size);
+        if (ret != 0) {
+            throw_with("aligned alloc failed: {}", std::strerror(ret));
+        }
+        m_data = static_cast<char *>(ptr);
+    }
+    AlignedBuffer(AlignedBuffer &&other) noexcept
+        : m_data(other.m_data), m_size(other.m_size) {
+        other.m_data = nullptr;
+        other.m_size = 0;
+    }
+    AlignedBuffer &operator=(AlignedBuffer &&other) noexcept {
+        if (this != &other) {
+            std::free(m_data);
+            m_data = other.m_data;
+            m_size = other.m_size;
+            other.m_data = nullptr;
+            other.m_size = 0;
+        }
+        return *this;
+    }
+    ~AlignedBuffer() {
+        std::free(m_data);
+    }
+
+    char *data() noexcept { return m_data; }
+    size_t size() const noexcept { return m_size; }
+
+private:
+    char *m_data{};
+    size_t m_size{};
 };
 
 class TaskQueue {
@@ -88,6 +135,33 @@ public:
 private:
     static constexpr size_t kTaskQueueCapacity = 1 << 15;
     boost::lockfree::queue<Task, boost::lockfree::capacity<kTaskQueueCapacity>> m_queue;
+    std::atomic<size_t> m_size{};
+};
+
+class DeleteQueue {
+public:
+    void enqueue(size_t file_number) {
+        while (!m_queue.push(file_number)) {
+            std::this_thread::yield();
+        }
+        m_size.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    bool try_pop(size_t &file_number) {
+        if (!m_queue.pop(file_number)) {
+            return false;
+        }
+        m_size.fetch_add(-1, std::memory_order_relaxed);
+        return true;
+    }
+
+    bool has_pending() const {
+        return m_size.load(std::memory_order_relaxed) > 0;
+    }
+
+private:
+    static constexpr size_t kDeleteQueueCapacity = 1 << 15;
+    boost::lockfree::queue<size_t, boost::lockfree::capacity<kDeleteQueueCapacity>> m_queue;
     std::atomic<size_t> m_size{};
 };
 
@@ -154,12 +228,24 @@ Options read_args(int argc, char **argv) {
         .help("fsync instead of fdatasync")
         .default_value(false)
         .implicit_value(true);
+    arg_parser.add_argument("--direct")
+        .help("use O_DIRECT for writes")
+        .default_value(false)
+        .implicit_value(true);
     arg_parser.add_argument("--start_file_number")
         .help("start file number")
         .scan<'d', size_t>()
         .default_value(1);
     arg_parser.add_argument("--stats_interval_ms")
         .help("stats interval ms (0 disable)")
+        .scan<'d', size_t>()
+        .default_value(0);
+    arg_parser.add_argument("--progress_interval_ms")
+        .help("progress interval ms (0 disable)")
+        .scan<'d', size_t>()
+        .default_value(0);
+    arg_parser.add_argument("--pacing_mbps")
+        .help("submit pacing in MiB/s (0 disable)")
         .scan<'d', size_t>()
         .default_value(0);
 
@@ -191,8 +277,11 @@ Options read_args(int argc, char **argv) {
     opts.range_sync_size = arg_parser.get<size_t>("-g");
     opts.wait_before = arg_parser.get<bool>("--wait_before");
     opts.use_fsync = arg_parser.get<bool>("--use_fsync");
+    opts.direct = arg_parser.get<bool>("--direct");
     opts.start_file_number = arg_parser.get<size_t>("--start_file_number");
     opts.stats_interval_ms = arg_parser.get<size_t>("--stats_interval_ms");
+    opts.progress_interval_ms = arg_parser.get<size_t>("--progress_interval_ms");
+    opts.pacing_mbps = arg_parser.get<size_t>("--pacing_mbps");
 
     opts.delete_after_sync = arg_parser.get<bool>("--delete_after_sync");
     opts.delete_batch_size = arg_parser.get<size_t>("--delete_batch_size");
@@ -208,6 +297,18 @@ Options read_args(int argc, char **argv) {
     }
     if (opts.queue_depth == 0) {
         throw_with("queue_depth must be > 0");
+    }
+    if (opts.direct) {
+        const auto direct_alignment = UringEngine::direct_alignment();
+        if (opts.write_size % direct_alignment != 0) {
+            throw_with("direct mode requires write_size % {} == 0", direct_alignment);
+        }
+        if (opts.file_size % direct_alignment != 0) {
+            throw_with("direct mode requires file_size % {} == 0", direct_alignment);
+        }
+        if (opts.write_size == 0) {
+            throw_with("write_size must be > 0");
+        }
     }
     opts.base_size_multiplier =
         (opts.file_size + opts.file_size_base - 1) / opts.file_size_base;
@@ -273,8 +374,21 @@ double avg_ms(uint64_t total_ns, uint64_t cnt) {
     return (total_ns / 1e6) / cnt;
 }
 
+std::string make_progress_bar(double fraction, size_t width) {
+    if (fraction < 0.0) {
+        fraction = 0.0;
+    } else if (fraction > 1.0) {
+        fraction = 1.0;
+    }
+    size_t filled = static_cast<size_t>(fraction * width + 0.5);
+    if (filled > width) {
+        filled = width;
+    }
+    return "[" + std::string(filled, '#') + std::string(width - filled, '.') + "]";
+}
+
 void run_worker(size_t thread_id, const Options &opts,
-                BytesBuffer &payload,
+                const BytesView &payload,
                 TaskQueue &task_queue,
                 std::atomic<size_t> &next_file_number,
                 std::atomic<size_t> &pending_files) {
@@ -326,6 +440,7 @@ void run_worker(size_t thread_id, const Options &opts,
 
 int main(int argc, char **argv) {
     auto opts = read_args(argc, argv);
+    const auto direct_alignment = UringEngine::direct_alignment();
     std::cout << "[Uring-Config]\n"
               << "  sst_dir           : " << opts.sst_dir << "\n"
               << "  base_pool_size    : " << opts.base_pool_size << "\n"
@@ -342,8 +457,11 @@ int main(int argc, char **argv) {
               << "  range_sync_size   : " << opts.range_sync_size << "\n"
               << "  wait_before       : " << opts.wait_before << "\n"
               << "  use_fsync         : " << opts.use_fsync << "\n"
+              << "  direct            : " << opts.direct << "\n"
               << "  start_file_number : " << opts.start_file_number << "\n"
               << "  stats_interval_ms : " << opts.stats_interval_ms << "\n"
+              << "  progress_interval_ms : " << opts.progress_interval_ms << "\n"
+              << "  pacing_mbps       : " << opts.pacing_mbps << "\n"
               << "  delete_after_sync : " << opts.delete_after_sync << "\n"
               << "  delete_batch_size : " << opts.delete_batch_size << std::endl;
 
@@ -364,34 +482,95 @@ int main(int argc, char **argv) {
 
     std::atomic<size_t> next_file_number{opts.start_file_number};
     std::atomic<size_t> pending_files{};
+    size_t total_files = opts.threads * opts.files_per_thread;
+    uint64_t total_bytes = static_cast<uint64_t>(opts.file_size) *
+        static_cast<uint64_t>(total_files);
     TaskQueue task_queue;
+    DeleteQueue delete_queue;
 
-    std::vector<BytesBuffer> payloads;
+    std::vector<BytesBuffer> raw_payloads;
+    std::vector<AlignedBuffer> raw_aligned_payloads;
+    std::vector<BytesView> payloads;
     payloads.reserve(opts.threads);
-    for (size_t i = 0; i < opts.threads; ++i) {
-        payloads.emplace_back(opts.write_size);
-        std::memset(payloads.back().data(), static_cast<int>('a' + (i % 26)),
-            payloads.back().size());
+    if (opts.direct) {
+        raw_aligned_payloads.reserve(opts.threads);
+        for (size_t i = 0; i < opts.threads; ++i) {
+            raw_aligned_payloads.emplace_back(opts.write_size, direct_alignment);
+            std::memset(raw_aligned_payloads.back().data(), static_cast<int>('a' + (i % 26)),
+                raw_aligned_payloads.back().size());
+        }
+        for (size_t i = 0; i < opts.threads; ++i) {
+            payloads.emplace_back(raw_aligned_payloads[i].data(), raw_aligned_payloads[i].size());
+        }
+    } else {
+        raw_payloads.reserve(opts.threads);
+        for (size_t i = 0; i < opts.threads; ++i) {
+            raw_payloads.emplace_back(opts.write_size);
+            std::memset(raw_payloads.back().data(), static_cast<int>('a' + (i % 26)),
+                raw_payloads.back().size());
+        }
+        for (size_t i = 0; i < opts.threads; ++i) {
+            payloads.emplace_back(raw_payloads[i].data(), raw_payloads[i].size());
+        }
     }
 
     std::atomic<bool> stop_submit{};
     std::thread submit_thread([&] {
         Task task;
+        const double pacing_bytes_per_s =
+            static_cast<double>(opts.pacing_mbps) * 1024.0 * 1024.0;
+        double tokens = pacing_bytes_per_s;
+        auto last_refill = std::chrono::steady_clock::now();
+        auto refill_tokens = [&] {
+            if (pacing_bytes_per_s <= 0.0) {
+                return;
+            }
+            auto now = std::chrono::steady_clock::now();
+            std::chrono::duration<double> secs = now - last_refill;
+            if (secs.count() <= 0.0) {
+                return;
+            }
+            tokens = std::min(tokens + pacing_bytes_per_s * secs.count(),
+                pacing_bytes_per_s);
+            last_refill = now;
+        };
+        auto throttle = [&](size_t bytes) {
+            if (pacing_bytes_per_s <= 0.0 || bytes == 0) {
+                return;
+            }
+            for (;;) {
+                refill_tokens();
+                if (tokens >= static_cast<double>(bytes)) {
+                    tokens -= static_cast<double>(bytes);
+                    break;
+                }
+                double deficit = static_cast<double>(bytes) - tokens;
+                double sleep_s = deficit / pacing_bytes_per_s;
+                if (sleep_s < 0.0005) {
+                    sleep_s = 0.0005;
+                }
+                std::this_thread::sleep_for(std::chrono::duration<double>(sleep_s));
+            }
+        };
+
         while (!stop_submit.load(std::memory_order_relaxed) ||
                pending_files.load(std::memory_order_relaxed) > 0 ||
-               task_queue.has_pending()) {
+               task_queue.has_pending() ||
+               delete_queue.has_pending()) {
             bool progressed = false;
             for (int i = 0; i < 64; ++i) {
                 if (!task_queue.try_pop(task)) {
                     break;
                 }
                 progressed = true;
+                if (task.type == TaskType::kWrite) {
+                    throttle(task.size);
+                }
                 switch (task.type) {
                     case TaskType::kWrite: {
-                        auto view = RingBuffer::View(
-                            task.payload->subspan(0, task.size));
+                        auto view = RingBuffer::View(task.payload->subspan(0, task.size));
                         engine->write_async(task.file_number, task.offset,
-                            static_cast<int>(opts.base_size_multiplier), view, nullptr);
+                            static_cast<int>(opts.base_size_multiplier), view, nullptr, opts.direct);
                         break;
                     }
                     case TaskType::kRangeSync:
@@ -407,25 +586,22 @@ int main(int argc, char **argv) {
                                               << std::endl;
                                 }
                                 if (opts.delete_after_sync) {
-                                    task_queue.enqueue(Task{
-                                        TaskType::kDelete,
-                                        done_file,
-                                        0,
-                                        0,
-                                        false,
-                                        false,
-                                        nullptr
-                                    });
+                                    delete_queue.enqueue(done_file);
                                 }
                                 pending_files.fetch_add(-1, std::memory_order_relaxed);
                             });
                         engine->sync_close_async(task.file_number, task.use_fsync, cb);
                         break;
                     }
-                    case TaskType::kDelete:
-                        engine->delete_file(task.file_number);
-                        break;
                 }
+            }
+            for (int i = 0; i < 64; ++i) {
+                size_t file_number{};
+                if (!delete_queue.try_pop(file_number)) {
+                    break;
+                }
+                progressed = true;
+                engine->delete_file(file_number);
             }
             while (engine->query()) {
                 progressed = true;
@@ -482,6 +658,29 @@ int main(int argc, char **argv) {
         });
     }
 
+    std::atomic<bool> stop_progress{};
+    std::thread progress_thread;
+    if (opts.progress_interval_ms > 0) {
+        progress_thread = std::thread([&] {
+            while (!stop_progress.load(std::memory_order_relaxed)) {
+                std::this_thread::sleep_for(
+                    std::chrono::milliseconds(opts.progress_interval_ms));
+                auto cur_stats = engine->stats_snapshot();
+                double fraction = total_bytes == 0 ? 1.0 :
+                    static_cast<double>(cur_stats.write_bytes) /
+                        static_cast<double>(total_bytes);
+                std::cerr << '\r' << "[Uring-Progress] "
+                          << std::fixed << std::setprecision(1)
+                          << (fraction * 100.0) << "% "
+                          << make_progress_bar(fraction, 30)
+                          << " (" << cur_stats.write_bytes << "/"
+                          << total_bytes << " bytes)"
+                          << std::flush;
+            }
+            std::cerr << std::endl;
+        });
+    }
+
     auto start_ts = std::chrono::steady_clock::now();
     auto start_stats = engine->stats_snapshot();
 
@@ -506,6 +705,10 @@ int main(int argc, char **argv) {
     if (stats_thread.joinable()) {
         stats_thread.join();
     }
+    stop_progress.store(true, std::memory_order_relaxed);
+    if (progress_thread.joinable()) {
+        progress_thread.join();
+    }
 
     auto end_stats = engine->stats_snapshot();
     std::chrono::duration<double> secs = end_ts - start_ts;
@@ -514,10 +717,6 @@ int main(int argc, char **argv) {
     double write_ops = delta.write_ops / secs.count();
     double range_sync_ops = delta.range_sync_ops / secs.count();
     double sync_close_ops = delta.sync_close_ops / secs.count();
-    size_t total_files = opts.threads * opts.files_per_thread;
-    uint64_t total_bytes = static_cast<uint64_t>(opts.file_size) *
-        static_cast<uint64_t>(total_files);
-
     std::cout << "[Uring-Summary] elapsed_s " << secs.count()
               << ", total_bytes " << total_bytes << "\n"
               << "  write       : " << write_mbps << " MiB/s, "

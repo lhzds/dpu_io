@@ -1,6 +1,8 @@
 #include "comm/frontend.h"
 #include "comm/frontend_qp.h"
 #include "config.h"
+#include "constant.h"
+#include "format/rb_req_resp_msg.h"
 #include "gtest/gtest.h"
 #include <cstdlib>
 #include <cstring>
@@ -102,6 +104,41 @@ TEST(FrontendTest, WriteMoreTest) {
         close(fd);
     }
     free(align_mem);
+}
+
+TEST(FrontendTest, DirectHeaderPaddingProtocol) {
+    auto frontend = std::make_unique<pulsedb::Frontend>(kBackendName, kHostDevPci, 1,
+        kHostReqRbCap, kHostRespRbCap);
+    auto *qp = frontend->alloc_qp();
+
+    constexpr size_t kAlign = pulsedb::kDefaultDirectAlignment;
+    ASSERT_EQ(frontend->direct_alignment(), kAlign);
+    ASSERT_EQ(qp->req_rb_ref().alignment(), kAlign);
+
+    std::string payload(kAlign, 'd');
+    qp->prep_write(1, 0, 1, true);
+    qp->append(payload);
+    auto expected_padding = static_cast<uint32_t>(
+        (kAlign - (sizeof(pulsedb::IoReqMsg::WriteHeader) % kAlign)) % kAlign);
+    auto req_size_before_post = qp->cur_write_size();
+    EXPECT_EQ(req_size_before_post,
+              sizeof(pulsedb::IoReqMsg::WriteHeader) + expected_padding + payload.size());
+    qp->post_write();
+    auto req_size_after_post = qp->cur_write_size();
+    EXPECT_EQ(req_size_after_post, 0U);
+
+    auto req_view = qp->req_rb_ref().to_view();
+    auto req_var = pulsedb::IoReqMsg::parse_from(req_view);
+    auto req = pulsedb::IoReqMsg::get_req_ptr<pulsedb::IoReqMsg::WriteMsgRbRef>(req_var);
+    ASSERT_TRUE(req->header->is_direct);
+    ASSERT_EQ(req->header->payload_padding_len, expected_padding);
+    ASSERT_TRUE(req->content.has_value());
+    ASSERT_EQ(req->content->size(), payload.size());
+    ASSERT_EQ(reinterpret_cast<uintptr_t>(req->content->first_part().data()) % kAlign, 0U);
+    auto merged = req->content->merge();
+    ASSERT_EQ(std::memcmp(merged.data(), payload.data(), payload.size()), 0);
+
+    frontend->free_qp(qp);
 }
 
 int main(int argc, char** argv) {

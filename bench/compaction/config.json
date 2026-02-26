@@ -18,6 +18,7 @@
   "range_sync_size": 4194304,
   "wait_before": false,
   "use_fsync": false,
+  "use_direct": false,
 
   "delete_batch_size": 128,
   "stats_interval_ms": 0,

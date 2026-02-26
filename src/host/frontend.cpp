@@ -7,11 +7,16 @@
 
 #include "bytes.h"
 #include "comm/frontend.h"
+#include "constant.h"
 #include "format/ctrl_msg.h"
 
 namespace pulsedb {
 Frontend::Frontend(const std::string_view &backend_name, const std::string_view &dev_pci,
         int qp_num, size_t req_rb_cap, size_t resp_rb_cap) {
+    m_direct_alignment = kDefaultDirectAlignment;
+    if ((m_direct_alignment & (m_direct_alignment - 1)) != 0) {
+        throw_with("Frontend: direct alignment must be power of two");
+    }
     SPDLOG_INFO("[Frontend] Starting...");
     docacxx::check_derr(docacxx::open_doca_device_with_pci(dev_pci.data(), &m_dev),
             "failed to open dev");
@@ -105,8 +110,9 @@ void Frontend::send_ctrl_msg(ConstBytesView raw_msg) {
 }
 
 void Frontend::send_init_msg(int qp_num) {
-    send_ctrl_msg(CtrlMsg::make_init_msg(qp_num));
-    SPDLOG_INFO("[Frontend] Send init msg[qp_num={}]", qp_num);
+    send_ctrl_msg(CtrlMsg::make_init_msg(qp_num, m_direct_alignment));
+    SPDLOG_INFO("[Frontend] Send init msg[qp_num={}, direct_alignment={}]", qp_num,
+        m_direct_alignment);
 }
 
 void Frontend::send_init_qp_msg(int qp_id,

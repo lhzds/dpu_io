@@ -8,6 +8,7 @@
 #include "doca_wrapper/queue_dma.h"
 #include "doca_wrapper/producers.h"
 #include "doca_wrapper/passive_consumer.h"
+#include "constant.h"
 #include "format/rb_meta_msg.h"
 #include "format/rb_req_resp_msg.h"
 #include "ring_buffer.h"
@@ -32,8 +33,9 @@ public:
 class RbMapping {
 public:    
     RbMapping(int id, doca_dev *dev, size_t dpu_rb_cap, ConstBytesView host_mmap_desc,
-        char *host_rb_data, size_t host_rb_cap, QueueDma *dma)
-        : m_id(id), m_dpu_rb(dpu_rb_cap), m_host_rb_rep(host_rb_cap), m_dma(dma) {
+        char *host_rb_data, size_t host_rb_cap, QueueDma *dma,
+        size_t direct_alignment = kDefaultDirectAlignment)
+        : m_id(id), m_dpu_rb(dpu_rb_cap, direct_alignment), m_host_rb_rep(host_rb_cap), m_dma(dma) {
         m_dpu_mmap = std::make_unique<docacxx::Mmap>(dev, m_dpu_rb.data(), m_dpu_rb.cap());
         m_host_mmap = std::make_unique<docacxx::Mmap>(host_mmap_desc, dev, host_rb_data, m_host_rb_rep.cap());
     }
@@ -80,9 +82,10 @@ public:
     using DmaDoneCb = std::function<void(int, DpuRbView &)>;
 
     ReqRbMapping(int id, doca_dev *dev, size_t dpu_rb_cap, ConstBytesView host_mmap_desc,
-        char *host_rb_data, size_t host_rb_cap, QueueDma *dma, DmaDoneCb cb)
+        char *host_rb_data, size_t host_rb_cap, QueueDma *dma, DmaDoneCb cb,
+        size_t direct_alignment = kDefaultDirectAlignment)
         : RbMapping(id, dev, dpu_rb_cap, host_mmap_desc,
-            host_rb_data, host_rb_cap, dma), m_dma_done_cb(std::move(cb)) {}
+            host_rb_data, host_rb_cap, dma, direct_alignment), m_dma_done_cb(std::move(cb)) {}
 
     void read_async(size_t data_size) {
         SPDLOG_INFO("[Req-Rb#{}] Receive meta msg[NewSize: new_size={}, dpu_rb_free_size={}]",
@@ -202,9 +205,10 @@ public:
     };
     using DpuRbView = RbViewWithStatus<DpuRbViewStatus>;
     RespRbMapping(int id, doca_dev *dev, size_t dpu_rb_cap, ConstBytesView host_mmap_desc,
-        char *host_rb_data, size_t host_rb_cap, QueueDma *dma)
+        char *host_rb_data, size_t host_rb_cap, QueueDma *dma,
+        size_t direct_alignment = kDefaultDirectAlignment)
         : RbMapping(id, dev, dpu_rb_cap, host_mmap_desc,
-            host_rb_data, host_rb_cap, dma), m_dmaing_host_rb_rep(host_rb_cap) {}
+            host_rb_data, host_rb_cap, dma, direct_alignment), m_dmaing_host_rb_rep(host_rb_cap) {}
 
     void append(BytesBuffer data) {
         SPDLOG_INFO("[Resp-Rb#{}] Try to append data to dpu rb[data_size={}, dpu_rb_head={},"
@@ -327,7 +331,8 @@ public:
         char *host_req_rb_data, size_t host_req_rb_cap,
         size_t dpu_resp_rb_cap, ConstBytesView host_resp_mmap_desc,
         char *host_resp_rb_data, size_t host_resp_rb_cap,
-        ReqRbMapping::DmaDoneCb req_dma_done_cb);
+        ReqRbMapping::DmaDoneCb req_dma_done_cb,
+        size_t direct_alignment = kDefaultDirectAlignment);
     ~DmaQpMapping();
 
     void create_consumer(Backend &backend);

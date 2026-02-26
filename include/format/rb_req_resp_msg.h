@@ -2,10 +2,12 @@
 
 #include <cassert>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <variant>
 
 #include "bytes.h"
+#include "constant.h"
 #include "io/io_engine.h"
 #include "noncopyable.h"
 #include "ring_buffer.h"
@@ -49,6 +51,8 @@ struct IoReqMsg {
         int base_size_multiplier;
         size_t offset;
         size_t size;
+        uint32_t payload_padding_len;
+        bool is_direct;
     };
     struct RangeSyncHeader: CommonHeader {
         size_t offset;
@@ -105,11 +109,15 @@ struct IoReqMsg {
         return std::move(std::get<std::unique_ptr<ReqType>>(variant));
     }
 
-    static void init_write_req_header(WriteHeader &header, size_t file_number, size_t offset, int base_size_multiplier) {
+    static void init_write_req_header(WriteHeader &header, size_t file_number, size_t offset,
+                                      int base_size_multiplier, bool is_direct = false,
+                                      uint32_t payload_padding_len = 0) {
         header.type = Type::kWrite;
         header.file_number = file_number;
         header.offset = offset;
         header.size = 0;
+        header.payload_padding_len = payload_padding_len;
+        header.is_direct = is_direct;
         header.base_size_multiplier = base_size_multiplier;
     }
 
@@ -144,6 +152,13 @@ struct IoReqMsg {
             case Type::kWrite: {
                 auto req = std::make_unique<WriteMsgRbRef>();
                 ref_or_copy_req_header(src, *req);
+                if (req->header->is_direct) {
+                    auto skip_len = static_cast<size_t>(req->header->payload_padding_len);
+                    if (skip_len > src.size()) {
+                        throw_with("IoReqMsg: Wrong direct write padding length");
+                    }
+                    src.cut(skip_len);
+                }
                 req->content = src.cut(req->header->size);
                 return req;
             }

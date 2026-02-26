@@ -31,7 +31,8 @@ public:
     size_t cur_write_size() const {
         return m_cur_write_req_size;
     }
-    void prep_write(size_t file_number, size_t offset, int base_size_multiplier = 1);
+    void prep_write(size_t file_number, size_t offset, int base_size_multiplier = 1,
+                    bool is_direct = false);
     void append(const ConstBytesView &content);
     void post_write();
     void post_range_sync(size_t file_number, size_t offset, size_t size, bool wait_before);
@@ -62,8 +63,9 @@ private:
 
     int m_sync_close_cnt{}; // 当前仍未完成的请求数
     size_t m_cur_write_req_size{};
-    std::optional<RingBuffer::View> m_reserved_header_space;
+    std::optional<RingBuffer::View> m_reserved_req_prefix_space;
     IoReqMsg::WriteHeader m_cache_header;
+    size_t m_write_alignment{1};
 
     RingBuffer m_req_rb;
     RingBuffer m_resp_rb;

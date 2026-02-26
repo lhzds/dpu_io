@@ -1,9 +1,11 @@
 #pragma once
 
+#include "aligned_buffer.h"
 #include "bytes.h"
 #include "types.h"
 
 #include <bit>
+#include <algorithm>
 #include <cassert>
 #include <cstring>
 #include <functional>
@@ -48,8 +50,10 @@ public:
     };
 
     RingBufferRep() {}
-    RingBufferRep(size_t cap) {
-        m_cap = std::__bit_ceil(cap);
+    RingBufferRep(size_t cap, size_t alignment = 1) {
+        assert(alignment > 0);
+        assert(std::has_single_bit(alignment));
+        m_cap = std::max(std::__bit_ceil(cap), alignment);
         m_mask = m_cap - 1;
     }
 
@@ -265,11 +269,25 @@ public:
     RingBuffer(RingBuffer &&) = default;
     RingBuffer &operator=(RingBuffer &&) = default;
 
-    explicit RingBuffer(const RingBuffer &) = default;
+    RingBuffer(const RingBuffer &other)
+        : m_rep(other.m_rep), m_alignment(other.m_alignment) {
+        m_buf = other.m_buf;
+    }
+    RingBuffer &operator=(const RingBuffer &other) {
+        if (this == &other) {
+            return *this;
+        }
+        m_rep = other.m_rep;
+        m_alignment = other.m_alignment;
+        m_buf = other.m_buf;
+        return *this;
+    }
 
     // cap 对齐到 2 的 N 次方
-    RingBuffer(size_t cap): m_rep(cap) {
-        m_buf.resize(m_rep.cap());
+    RingBuffer(size_t cap, size_t alignment = 1): m_rep(cap, alignment), m_alignment(alignment) {
+        assert(m_alignment > 0);
+        assert(std::has_single_bit(m_alignment));
+        m_buf.reset(m_rep.cap(), m_alignment);
     }
 
     bool write(const ConstBytesView &src) {
@@ -337,6 +355,10 @@ public:
 
     size_t cap() const noexcept {
         return m_rep.cap();
+    }
+
+    size_t alignment() const noexcept {
+        return m_alignment;
     }
 
     size_t size() const noexcept {
@@ -439,7 +461,8 @@ private:
     }
 
     RingBufferRep m_rep;
-    BytesBuffer m_buf;
+    size_t m_alignment{1};
+    AlignedBuffer m_buf;
 };
 
 } // namespace pulsedb

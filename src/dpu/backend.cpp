@@ -64,7 +64,12 @@ Backend::Backend(const std::string_view &name, const std::string_view &dev_pci,
         doca_pe_progress(m_pe);
     }
 
-    auto qp_num = recv_ctrl_msg<CtrlMsg::InitMsgRef>().header->qp_num;
+    auto init_msg = recv_ctrl_msg<CtrlMsg::InitMsgRef>();
+    auto qp_num = init_msg.header->qp_num;
+    m_direct_alignment = init_msg.header->direct_alignment;
+    if (m_direct_alignment == 0 || (m_direct_alignment & (m_direct_alignment - 1)) != 0) {
+        throw_with("Backend: Invalid direct alignment={}", m_direct_alignment);
+    }
     send_ack_msg();
 
     m_qps.reserve(qp_num);
@@ -81,7 +86,8 @@ Backend::Backend(const std::string_view &name, const std::string_view &dev_pci,
             dpu_resp_rb_cap,
             ConstBytesView(init_qp_msg.host_resp_mmap_desc, header->host_resp_mmap_desc_size),
             header->host_resp_rb_data, header->host_resp_rb_cap,
-            [&](int qp_id, auto &req_view) { submit_request_to_io_engine(qp_id, req_view); }
+            [&](int qp_id, auto &req_view) { submit_request_to_io_engine(qp_id, req_view); },
+            m_direct_alignment
         ));
 
         auto &qp = m_qps.back();
@@ -233,7 +239,7 @@ void Backend::submit_request_to_io_engine(int qp_id, ReqRbMapping::DpuRbView &re
                     m_qps[qp_id]->finish_req(req_view);
             });
             m_io_ctx->write_async(header.file_number, header.offset,
-                header.base_size_multiplier, *write_ref->content, cb, false);
+                header.base_size_multiplier, *write_ref->content, cb, header.is_direct);
             break;
         }
         case IoReqMsg::Type::kRangeSync: {

@@ -26,6 +26,7 @@ struct CtrlMsg {
     };
     struct InitHeader: CommonHeader {
         int qp_num{};
+        size_t direct_alignment{};
     };
     struct InitQpHeader: CommonHeader {
         int qp_id{-1};
@@ -75,11 +76,12 @@ struct CtrlMsg {
         AckMsgRef
     >;
 
-    static BytesBuffer make_init_msg(int qp_num) {
+    static BytesBuffer make_init_msg(int qp_num, size_t direct_alignment) {
         BytesBuffer buf(sizeof(InitHeader));
         auto *header = (InitHeader *)buf.data();
         header->type = Type::kInit;
         header->qp_num = qp_num;
+        header->direct_alignment = direct_alignment;
         return buf;
     }
 

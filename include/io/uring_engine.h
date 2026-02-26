@@ -14,6 +14,7 @@
 #include <thread>
 #include <unistd.h>
 
+#include "constant.h"
 #include "io/sst_pool.h"
 #include "io_engine.h"
 
@@ -487,7 +488,7 @@ private:
     std::unique_ptr<SstPool> m_sst_pool;
     std::unordered_map<size_t, std::unique_ptr<FileCtx>> m_writing_files;
 
-    static constexpr size_t kDirectAlignment = 4096;
+    static constexpr size_t kDirectAlignment = kDefaultDirectAlignment;
 
     static bool is_aligned_size(size_t value) {
         return (value % kDirectAlignment) == 0;

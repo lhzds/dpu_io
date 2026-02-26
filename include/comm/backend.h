@@ -10,6 +10,7 @@
 #include "format/ctrl_msg.h"
 #include "io/io_engine.h"
 #include "noncopyable.h"
+#include "constant.h"
 #include "types.h"
 
 namespace pulsedb {
@@ -61,6 +62,7 @@ private:
     bool m_is_ctrl_msg_sended{};
     std::optional<CtrlMsg::RefVariant> m_ctrl_msg_variant{};
     std::optional<size_t> m_new_consumer_id{};
+    size_t m_direct_alignment{kDefaultDirectAlignment};
 };
 
 } // pulsedb

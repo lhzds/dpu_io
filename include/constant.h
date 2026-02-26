@@ -10,5 +10,6 @@ constexpr size_t GB = (1 << 30);
 
 constexpr size_t kIoEngineCqDepth = 1024;
 constexpr size_t kCommRbMetaSize = 128;
+constexpr size_t kDefaultDirectAlignment = 4096;
 
 } // namespace pulsedb

@@ -13,6 +13,8 @@
 #include "bytes.h"
 #include "comm/frontend.h"
 #include "comm/frontend_qp.h"
+#include "constant.h"
+#include "format/rb_req_resp_msg.h"
 #include "util.h"
 
 using namespace pulsedb;
@@ -37,6 +39,7 @@ struct Options {
     size_t range_sync_size{};
     bool wait_before{};
     bool use_fsync{};
+    bool use_direct{};
     size_t start_file_number{};
 
     size_t file_size_base{};
@@ -209,6 +212,10 @@ Options read_args(int argc, char **argv) {
         .help("fsync instead of fdatasync")
         .default_value(false)
         .implicit_value(true);
+    arg_parser.add_argument("--use_direct")
+        .help("enable direct write protocol mode")
+        .default_value(false)
+        .implicit_value(true);
     arg_parser.add_argument("--start_file_number")
         .help("start file number")
         .scan<'d', size_t>()
@@ -245,6 +252,7 @@ Options read_args(int argc, char **argv) {
     opts.range_sync_size = arg_parser.get<size_t>("-g");
     opts.wait_before = arg_parser.get<bool>("--wait_before");
     opts.use_fsync = arg_parser.get<bool>("--use_fsync");
+    opts.use_direct = arg_parser.get<bool>("--use_direct");
     opts.start_file_number = arg_parser.get<size_t>("--start_file_number");
 
     opts.file_size_base = arg_parser.get<size_t>("-b");
@@ -269,6 +277,17 @@ Options read_args(int argc, char **argv) {
     }
     if (opts.file_size_base == 0) {
         throw_with("file_size_base must be > 0");
+    }
+    if (opts.use_direct) {
+        auto align = kDefaultDirectAlignment;
+        if ((opts.write_size % align) != 0) {
+            throw_with("direct mode requires write_size aligned: write_size={}, alignment={}",
+                opts.write_size, align);
+        }
+        if ((opts.file_size % align) != 0) {
+            throw_with("direct mode requires file_size aligned: file_size={}, alignment={}",
+                opts.file_size, align);
+        }
     }
     opts.base_size_multiplier =
         (opts.file_size + opts.file_size_base - 1) / opts.file_size_base;
@@ -302,7 +321,7 @@ void run_worker(size_t thread_id, Frontend &frontend, const Options &opts, Atomi
         size_t last_sync_offset = 0;
         while (offset < opts.file_size) {
             size_t cur_size = std::min(opts.write_size, opts.file_size - offset);
-            qp->prep_write(file_number, offset, opts.base_size_multiplier);
+            qp->prep_write(file_number, offset, opts.base_size_multiplier, opts.use_direct);
             qp->append({payload.data(), cur_size});
             qp->post_write();
 
@@ -381,6 +400,7 @@ int main(int argc, char **argv) {
               << "  range_sync_size   : " << opts.range_sync_size << "\n"
               << "  wait_before       : " << opts.wait_before << "\n"
               << "  use_fsync         : " << opts.use_fsync << "\n"
+              << "  use_direct        : " << opts.use_direct << "\n"
               << "  delete_batch_size : " << opts.delete_batch_size << std::endl;
 
     auto frontend = std::make_unique<Frontend>(

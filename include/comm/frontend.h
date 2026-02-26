@@ -26,6 +26,7 @@ public:
     doca_dev *dev() { return m_dev; }
     doca_pe *pe() { return m_pe; }
     doca_comch_connection *conn() { return m_conn; }
+    size_t direct_alignment() const { return m_direct_alignment; }
 
 private:
     void send_ctrl_msg(ConstBytesView raw_msg);
@@ -56,6 +57,7 @@ private:
     bool m_is_ctrl_msg_sended{};
     std::optional<CtrlMsg::RefVariant> m_ctrl_msg_ref_var{};
     std::optional<size_t> m_new_consumer_id{};
+    size_t m_direct_alignment{};
 
     std::mutex m_mu;
 };

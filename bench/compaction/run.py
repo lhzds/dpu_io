@@ -56,6 +56,8 @@ if cfg.get("wait_before", False):
     base_cmd.append("--wait_before")
 if cfg.get("use_fsync", False):
     base_cmd.append("--use_fsync")
+if cfg.get("use_direct", False):
+    base_cmd.append("--use_direct")
 
 extra_args = cfg.get("extra_args", [])
 if extra_args:

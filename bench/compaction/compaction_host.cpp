@@ -441,6 +441,7 @@ int main(int argc, char **argv) {
     std::atomic<bool> stop_progress{};
     std::thread stats_thread;
     std::thread progress_thread;
+    uint64_t last_progress_done = static_cast<uint64_t>(-1);
     std::thread delete_thread([&] { deleter.run(); });
     if (opts.stats_interval_ms > 0) {
         auto prev_ts = std::chrono::steady_clock::now();
@@ -500,6 +501,10 @@ int main(int argc, char **argv) {
                 std::this_thread::sleep_for(
                     std::chrono::milliseconds(opts.progress_interval_ms));
                 uint64_t done = submitted_bytes.load(std::memory_order_relaxed);
+                if (done > total_bytes) {
+                    done = total_bytes;
+                }
+                last_progress_done = done;
                 double fraction = total_bytes == 0 ? 1.0 :
                     static_cast<double>(done) / static_cast<double>(total_bytes);
                 std::cerr << '\r' << "[Host-Progress] "
@@ -546,14 +551,16 @@ int main(int argc, char **argv) {
         if (done > total_bytes) {
             done = total_bytes;
         }
-        double fraction = total_bytes == 0 ? 1.0 :
-            static_cast<double>(done) / static_cast<double>(total_bytes);
-        std::cerr << '\r' << "[Host-Progress] "
-                  << std::fixed << std::setprecision(1)
-                  << (fraction * 100.0) << "% "
-                  << make_progress_bar(fraction, 30)
-                  << " (" << done << "/" << total_bytes << " bytes)"
-                  << std::endl;
+        if (done != last_progress_done) {
+            double fraction = total_bytes == 0 ? 1.0 :
+                static_cast<double>(done) / static_cast<double>(total_bytes);
+            std::cerr << '\r' << "[Host-Progress] "
+                      << std::fixed << std::setprecision(1)
+                      << (fraction * 100.0) << "% "
+                      << make_progress_bar(fraction, 30)
+                      << " (" << done << "/" << total_bytes << " bytes)"
+                      << std::endl;
+        }
     }
 
     std::chrono::duration<double> secs = end - start;

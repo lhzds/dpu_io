@@ -14,6 +14,7 @@
 #include <thread>
 #include <vector>
 
+#include "aligned_buffer.h"
 #include "bytes.h"
 #include "io/sst_pool.h"
 #include "io/uring_engine.h"
@@ -68,47 +69,6 @@ struct Task {
     bool wait_before{};
     bool use_fsync{};
     const BytesView *payload{};
-};
-
-class AlignedBuffer {
-public:
-    AlignedBuffer() = default;
-    explicit AlignedBuffer(size_t size, size_t alignment) : m_size(size) {
-        if (size == 0) {
-            return;
-        }
-        void *ptr = nullptr;
-        int ret = posix_memalign(&ptr, alignment, size);
-        if (ret != 0) {
-            throw_with("aligned alloc failed: {}", std::strerror(ret));
-        }
-        m_data = static_cast<char *>(ptr);
-    }
-    AlignedBuffer(AlignedBuffer &&other) noexcept
-        : m_data(other.m_data), m_size(other.m_size) {
-        other.m_data = nullptr;
-        other.m_size = 0;
-    }
-    AlignedBuffer &operator=(AlignedBuffer &&other) noexcept {
-        if (this != &other) {
-            std::free(m_data);
-            m_data = other.m_data;
-            m_size = other.m_size;
-            other.m_data = nullptr;
-            other.m_size = 0;
-        }
-        return *this;
-    }
-    ~AlignedBuffer() {
-        std::free(m_data);
-    }
-
-    char *data() noexcept { return m_data; }
-    size_t size() const noexcept { return m_size; }
-
-private:
-    char *m_data{};
-    size_t m_size{};
 };
 
 class TaskQueue {
@@ -489,7 +449,7 @@ int main(int argc, char **argv) {
     DeleteQueue delete_queue;
 
     std::vector<BytesBuffer> raw_payloads;
-    std::vector<AlignedBuffer> raw_aligned_payloads;
+    std::vector<pulsedb::AlignedBuffer> raw_aligned_payloads;
     std::vector<BytesView> payloads;
     payloads.reserve(opts.threads);
     if (opts.direct) {

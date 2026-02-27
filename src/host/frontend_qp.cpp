@@ -127,6 +127,7 @@ void FrontendQp::prep_write(size_t file_number, size_t offset, int base_size_mul
     if (is_preping_write()) {
         throw_with("FrontendQp: Prepare write doubly");
     }
+    m_cur_write_req_start_offset = m_req_rb.tail();
     size_t direct_padding_len{};
     size_t header_size = sizeof(IoReqMsg::WriteHeader);
     size_t req_prefix_size = header_size;
@@ -134,8 +135,9 @@ void FrontendQp::prep_write(size_t file_number, size_t offset, int base_size_mul
         if (m_write_alignment == 0 || (m_write_alignment & (m_write_alignment - 1)) != 0) {
             throw_with("FrontendQp: Invalid direct alignment={}", m_write_alignment);
         }
+        size_t payload_offset = (m_cur_write_req_start_offset + header_size) % m_req_rb.cap();
         direct_padding_len =
-            (m_write_alignment - (header_size % m_write_alignment)) % m_write_alignment;
+            (m_write_alignment - (payload_offset % m_write_alignment)) % m_write_alignment;
         req_prefix_size += direct_padding_len;
     }
     IoReqMsg::init_write_req_header(m_cache_header, file_number, offset,
@@ -200,8 +202,10 @@ void FrontendQp::post_write() {
             throw_with("FrontendQp: Direct write size not aligned[size={}, alignment={}]",
                 m_cache_header.size, m_write_alignment);
         }
+        size_t payload_offset = (m_cur_write_req_start_offset + sizeof(m_cache_header))
+            % m_req_rb.cap();
         auto expected_padding_len =
-            (m_write_alignment - (sizeof(m_cache_header) % m_write_alignment)) % m_write_alignment;
+            (m_write_alignment - (payload_offset % m_write_alignment)) % m_write_alignment;
         if (direct_padding_len != expected_padding_len) {
             throw_with("FrontendQp: Direct padding mismatch[padding={}, expected={}]",
                 direct_padding_len, expected_padding_len);
@@ -217,9 +221,12 @@ void FrontendQp::post_write() {
     m_reserved_req_prefix_space->write({(char *)&m_cache_header, sizeof(m_cache_header)});
 
     size_t req_size = sizeof(m_cache_header) + direct_padding_len + m_cache_header.size;
-    if (m_cache_header.is_direct && ((req_size % m_write_alignment) != 0)) {
-        throw_with("FrontendQp: Direct request size not aligned[req_size={}, alignment={}]",
-            req_size, m_write_alignment);
+    if (m_cache_header.is_direct) {
+        size_t req_end_offset = (m_cur_write_req_start_offset + req_size) % m_req_rb.cap();
+        if ((req_end_offset % m_write_alignment) != 0) {
+            throw_with("FrontendQp: Direct request end not aligned[end_offset={}, alignment={}]",
+                req_end_offset, m_write_alignment);
+        }
     }
 
     SPDLOG_INFO(
@@ -230,6 +237,7 @@ void FrontendQp::post_write() {
     send_req_rb_new_size(req_size);
     m_reserved_req_prefix_space = std::nullopt;
     m_cur_write_req_size = 0;
+    m_cur_write_req_start_offset = 0;
 }
 
 std::vector<std::pair<int, int>> FrontendQp::wait_all() {

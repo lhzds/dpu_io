@@ -17,9 +17,10 @@ def expand_path(path):
 
 def resolve_path(path):
     expanded = expand_path(path)
-    if os.path.isabs(expanded):
-        return expanded
-    return str(Path(__file__).parent / expanded)
+    p = Path(expanded)
+    if not p.is_absolute():
+        p = Path(__file__).parent / p
+    return str(p.resolve())
 
 
 def next_run_id(output_dir, job_name):
@@ -52,7 +53,18 @@ def parse_run_id(value, output_dir, job_name):
 
 
 cfg = load_config()
-host_exe = expand_path(cfg["host_exe"])
+project_dir = resolve_path(cfg.get("project_dir", "../.."))
+host_target = cfg.get("host_target", "bench_uring")
+
+
+def parse_build_mode(config, key="build_mode", default="release"):
+    value = config.get(key, default)
+    if not isinstance(value, str):
+        raise ValueError(f"{key} must be 'release' or 'debug'")
+    mode = value.lower()
+    if mode not in ("release", "debug"):
+        raise ValueError(f"{key} must be 'release' or 'debug'")
+    return mode
 
 
 def get_thread_values(config):
@@ -70,6 +82,8 @@ def get_thread_values(config):
 
 
 thread_values = get_thread_values(cfg)
+build_mode = parse_build_mode(cfg)
+subprocess.run(["xmake", "f", "-P", project_dir, "-m", build_mode], check=True)
 output_dir = resolve_path(cfg.get("output_dir", "./output"))
 os.makedirs(output_dir, exist_ok=True)
 output_dir_path = Path(output_dir)
@@ -77,7 +91,10 @@ job_name = cfg.get("job_name", "uring")
 run_id = parse_run_id(cfg.get("run_id"), output_dir_path, job_name)
 name_prefix = f"{job_name}_run{run_id}" if run_id is not None else job_name
 base_cmd = [
-    host_exe,
+    "xmake",
+    "run",
+    "-P", project_dir,
+    host_target,
     "--sst_dir", expand_path(cfg["sst_dir"]),
     "--base_pool_size", str(cfg["base_pool_size"]),
     "--big_pool_cnt", str(cfg["big_pool_cnt"]),

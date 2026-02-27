@@ -1,5 +1,7 @@
 {
-    "host_exe": "~/dpu_io/build/linux/arm64/release/bench_uring",
+    "project_dir": "../..",
+    "host_target": "bench_uring",
+    "build_mode": "release",
     "sst_dir": "/home/olh/mnt/sst_pool",
     "base_pool_size": 4000,
     "big_pool_cnt": 0,

@@ -1,6 +1,10 @@
 {
-  "host_exe": "~/pulseDB/pulsedb/build/linux/x86_64/release/bench_comch_lat_host",
-  "dpu_exe": "~/pulsedb/build/linux/arm64/release/bench_comch_lat_dpu",
+  "host_project_dir": "../..",
+  "host_target": "bench_comch_lat_host",
+  "host_build_mode": "release",
+  "dpu_project_dir": "~/pulsedb",
+  "dpu_target": "bench_comch_lat_dpu",
+  "dpu_build_mode": "release",
   "output_dir": "~/comch_lat",
   "dpu_username": "olh",
   "dpu_ip": "192.168.100.2",

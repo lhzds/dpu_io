@@ -15,7 +15,8 @@ end
 add_defines("SPDLOG_FMT_EXTERNAL")
 
 add_requires("fmt 9.1.0", "spdlog 1.12.0", "boost", "argparse")
-add_packages("spdlog", "fmt", "boost", "argparse")
+add_packages("spdlog", "fmt", "argparse")
+add_packages("boost", {links = {}})
 
 add_ldflags("-luring")
 

@@ -63,6 +63,7 @@ private:
 
     int m_sync_close_cnt{}; // 当前仍未完成的请求数
     size_t m_cur_write_req_size{};
+    size_t m_cur_write_req_start_offset{};
     std::optional<RingBuffer::View> m_reserved_req_prefix_space;
     IoReqMsg::WriteHeader m_cache_header;
     size_t m_write_alignment{1};

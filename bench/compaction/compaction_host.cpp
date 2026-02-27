@@ -1,8 +1,10 @@
 #include <argparse/argparse.hpp>
 #include <atomic>
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
+#include <iomanip>
 #include <iostream>
 #include <mutex>
 #include <queue>
@@ -46,6 +48,7 @@ struct Options {
     size_t base_size_multiplier{};
 
     size_t stats_interval_ms{};
+    size_t progress_interval_ms{};
     size_t delete_batch_size{};
 };
 
@@ -154,6 +157,19 @@ private:
     bool m_stop{};
 };
 
+std::string make_progress_bar(double fraction, size_t width) {
+    if (fraction < 0.0) {
+        fraction = 0.0;
+    } else if (fraction > 1.0) {
+        fraction = 1.0;
+    }
+    size_t filled = static_cast<size_t>(fraction * width + 0.5);
+    if (filled > width) {
+        filled = width;
+    }
+    return "[" + std::string(filled, '#') + std::string(width - filled, '.') + "]";
+}
+
 Options read_args(int argc, char **argv) {
     argparse::ArgumentParser arg_parser("bench_compaction_host");
 
@@ -229,6 +245,10 @@ Options read_args(int argc, char **argv) {
         .help("stats interval ms (0 disable)")
         .scan<'d', size_t>()
         .default_value(0);
+    arg_parser.add_argument("--progress_interval_ms")
+        .help("progress interval ms (0 disable)")
+        .scan<'d', size_t>()
+        .default_value(0);
     arg_parser.add_argument("--delete_batch_size")
         .help("delete_files batch size")
         .scan<'d', size_t>()
@@ -258,6 +278,7 @@ Options read_args(int argc, char **argv) {
     opts.file_size_base = arg_parser.get<size_t>("-b");
 
     opts.stats_interval_ms = arg_parser.get<size_t>("-i");
+    opts.progress_interval_ms = arg_parser.get<size_t>("--progress_interval_ms");
     opts.delete_batch_size = arg_parser.get<size_t>("--delete_batch_size");
 
     if (opts.qp_num == 0) {
@@ -298,7 +319,8 @@ Options read_args(int argc, char **argv) {
 }
 
 void run_worker(size_t thread_id, Frontend &frontend, const Options &opts, AtomicStats &stats,
-                SlotPool &slot_pool, DeleteQueue &deleter, std::atomic<size_t> &next_file_number) {
+                SlotPool &slot_pool, DeleteQueue &deleter, std::atomic<size_t> &next_file_number,
+                std::atomic<uint64_t> &submitted_bytes) {
     auto *qp = frontend.alloc_qp();
 
     std::string payload(opts.write_size, static_cast<char>('a' + (thread_id % 26)));
@@ -324,6 +346,7 @@ void run_worker(size_t thread_id, Frontend &frontend, const Options &opts, Atomi
             qp->prep_write(file_number, offset, opts.base_size_multiplier, opts.use_direct);
             qp->append({payload.data(), cur_size});
             qp->post_write();
+            submitted_bytes.fetch_add(static_cast<uint64_t>(cur_size), std::memory_order_relaxed);
 
             offset += cur_size;
             if (opts.range_sync_size > 0 &&
@@ -401,6 +424,7 @@ int main(int argc, char **argv) {
               << "  wait_before       : " << opts.wait_before << "\n"
               << "  use_fsync         : " << opts.use_fsync << "\n"
               << "  use_direct        : " << opts.use_direct << "\n"
+              << "  progress_interval_ms : " << opts.progress_interval_ms << "\n"
               << "  delete_batch_size : " << opts.delete_batch_size << std::endl;
 
     auto frontend = std::make_unique<Frontend>(
@@ -412,8 +436,11 @@ int main(int argc, char **argv) {
     SlotPool slot_pool(opts.slot_pool_size);
     DeleteQueue deleter(*frontend, slot_pool, opts.delete_batch_size);
     std::atomic<size_t> next_file_number{opts.start_file_number};
+    std::atomic<uint64_t> submitted_bytes{};
     std::atomic<bool> stop_stats{};
+    std::atomic<bool> stop_progress{};
     std::thread stats_thread;
+    std::thread progress_thread;
     std::thread delete_thread([&] { deleter.run(); });
     if (opts.stats_interval_ms > 0) {
         auto prev_ts = std::chrono::steady_clock::now();
@@ -464,13 +491,35 @@ int main(int argc, char **argv) {
             }
         });
     }
+    if (opts.progress_interval_ms > 0) {
+        uint64_t total_bytes = static_cast<uint64_t>(opts.file_size) *
+            static_cast<uint64_t>(opts.files_per_thread) *
+            static_cast<uint64_t>(opts.threads);
+        progress_thread = std::thread([&] {
+            while (!stop_progress.load(std::memory_order_relaxed)) {
+                std::this_thread::sleep_for(
+                    std::chrono::milliseconds(opts.progress_interval_ms));
+                uint64_t done = submitted_bytes.load(std::memory_order_relaxed);
+                double fraction = total_bytes == 0 ? 1.0 :
+                    static_cast<double>(done) / static_cast<double>(total_bytes);
+                std::cerr << '\r' << "[Host-Progress] "
+                          << std::fixed << std::setprecision(1)
+                          << (fraction * 100.0) << "% "
+                          << make_progress_bar(fraction, 30)
+                          << " (" << done << "/" << total_bytes << " bytes)"
+                          << std::flush;
+            }
+            std::cerr << std::endl;
+        });
+    }
 
     auto start = std::chrono::steady_clock::now();
     std::vector<std::thread> workers;
     workers.reserve(opts.threads);
     for (size_t i = 0; i < opts.threads; ++i) {
         workers.emplace_back([&, i] {
-            run_worker(i, *frontend, opts, stats, slot_pool, deleter, next_file_number);
+            run_worker(i, *frontend, opts, stats, slot_pool, deleter, next_file_number,
+                submitted_bytes);
         });
     }
     for (auto &t : workers) {
@@ -482,8 +531,29 @@ int main(int argc, char **argv) {
     }
     auto end = std::chrono::steady_clock::now();
     stop_stats.store(true, std::memory_order_relaxed);
+    stop_progress.store(true, std::memory_order_relaxed);
     if (stats_thread.joinable()) {
         stats_thread.join();
+    }
+    if (progress_thread.joinable()) {
+        progress_thread.join();
+    }
+    if (opts.progress_interval_ms > 0) {
+        uint64_t total_bytes = static_cast<uint64_t>(opts.file_size) *
+            static_cast<uint64_t>(opts.files_per_thread) *
+            static_cast<uint64_t>(opts.threads);
+        uint64_t done = submitted_bytes.load(std::memory_order_relaxed);
+        if (done > total_bytes) {
+            done = total_bytes;
+        }
+        double fraction = total_bytes == 0 ? 1.0 :
+            static_cast<double>(done) / static_cast<double>(total_bytes);
+        std::cerr << '\r' << "[Host-Progress] "
+                  << std::fixed << std::setprecision(1)
+                  << (fraction * 100.0) << "% "
+                  << make_progress_bar(fraction, 30)
+                  << " (" << done << "/" << total_bytes << " bytes)"
+                  << std::endl;
     }
 
     std::chrono::duration<double> secs = end - start;

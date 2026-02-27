@@ -1,26 +1,32 @@
 {
-  "host_exe": "~/dpu_io/build/linux/x86_64/release/bench_compaction_host",
+  "project_dir": "../..",
+  "host_target": "bench_compaction_host",
+  "build_mode": "release",
   "backend_name": "backend",
   "dev_pci": "b1:00.1",
   "threads": [4],
   "qp_num": 0,
   "req_rb_cap": 536870912,
   "resp_rb_cap": 1048576,
+  "output_dir": "./output",
+  "run_id": "auto",
+  "job_name": "compaction",
 
   "slot_pool_size": 4000,
   "file_size_base": 67108864,
   "start_file_number": 1,
 
   "file_size": 67108864,
-  "files_per_thread": 800,
+  "files_per_thread": 100,
   "wait_every_files": 50,
   "write_size": 1048576,
   "range_sync_size": 4194304,
   "wait_before": false,
   "use_fsync": false,
-  "use_direct": false,
+  "use_direct": true,
 
   "delete_batch_size": 128,
   "stats_interval_ms": 0,
+  "progress_interval_ms": 1000,
   "extra_args": []
 }

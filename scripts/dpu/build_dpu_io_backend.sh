@@ -6,6 +6,6 @@ source "$SCRIPT_DIR/../settings.sh"
 SUBPROJ_DIR=$(dirname "$(dirname "$(realpath "$(dirname "$0")")")")
 
 cd $SUBPROJ_DIR
-xmake f -m $MODE
-xmake build backend_run
+XMAKE_ROOT=y xmake f -m $MODE
+XMAKE_ROOT=y xmake build backend_run
 cd -

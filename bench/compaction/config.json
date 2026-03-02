@@ -17,13 +17,13 @@
   "start_file_number": 1,
 
   "file_size": 67108864,
-  "files_per_thread": 100,
+  "files_per_thread": 400,
   "wait_every_files": 50,
   "write_size": 1048576,
   "range_sync_size": 4194304,
   "wait_before": false,
   "use_fsync": false,
-  "use_direct": true,
+  "use_direct": false,
 
   "delete_batch_size": 128,
   "stats_interval_ms": 0,

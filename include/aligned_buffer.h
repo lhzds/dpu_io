@@ -1,6 +1,5 @@
 #pragma once
 
-#include <bit>
 #include <cassert>
 #include <cstddef>
 #include <cstdlib>
@@ -70,7 +69,7 @@ private:
     using Storage = std::unique_ptr<char, decltype(&std::free)>;
 
     static void validate_alignment(size_t alignment) {
-        if (alignment == 0 || !std::has_single_bit(alignment)) {
+        if (alignment == 0 || (alignment & (alignment - 1)) != 0) {
             throw_with("AlignedBuffer: Invalid alignment={}", alignment);
         }
     }

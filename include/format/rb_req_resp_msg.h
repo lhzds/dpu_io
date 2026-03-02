@@ -69,7 +69,7 @@ struct IoReqMsg {
     struct MsgRbRef: public Noncopyable {
         HeaderType *header{};
         ~MsgRbRef() {
-            if (m_owner_flag & 1) {
+            if (m_header_owner) {
                 delete header;
             }
         }
@@ -79,10 +79,10 @@ struct IoReqMsg {
         }
 
         void be_header_owner() {
-            m_owner_flag &= 1;
+            m_header_owner = true;
         }
     private:
-        uint8_t m_owner_flag{}; // 1: header
+        bool m_header_owner{};
     };
     struct WriteMsgRbRef: public MsgRbRef<WriteHeader>  {
         std::optional<RingBuffer::View> content;
@@ -194,15 +194,16 @@ private:
     static void ref_or_copy_req_header(RingBuffer::View &src, RequestRef &req) {
         using Header =  std::remove_reference_t<decltype(*req.header)>;
         auto header_rb_slice = src.cut(sizeof(Header));
-        char *stream;
+        Header *header_ptr{};
         if (header_rb_slice.second_part()) {
-            stream = new char[header_rb_slice.size()];
-            header_rb_slice.merge({stream, header_rb_slice.size()});
+            auto *owned_header = new Header{};
+            header_rb_slice.merge({reinterpret_cast<char *>(owned_header), sizeof(Header)});
             req.be_header_owner();
+            header_ptr = owned_header;
         } else {
-            stream = header_rb_slice.first_part().data();
+            header_ptr = reinterpret_cast<Header *>(header_rb_slice.first_part().data());
         }
-        req.header = (Header *)stream;
+        req.header = header_ptr;
     }
 };
 

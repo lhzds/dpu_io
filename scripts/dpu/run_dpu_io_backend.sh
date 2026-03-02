@@ -9,8 +9,8 @@ SUBPROJ_DIR=$(dirname "$(dirname "$(realpath "$(dirname "$0")")")")
 
 cd $SUBPROJ_DIR
 
-xmake f -m $MODE
-xmake run backend_run \
+XMAKE_ROOT=y xmake f -m $MODE
+XMAKE_ROOT=y xmake run backend_run \
     -n $BACKEND_NAME -r $DEV_PCI -R $DEV_REP_PCI \
     -u $URING_QUEUE_DEPTH --dpu_dma_task_slot_num $DPU_DMA_TASK_SLOT_NUM \
     -x $DPU_REQ_RB_CAP -y $DPU_RESP_RB_CAP \

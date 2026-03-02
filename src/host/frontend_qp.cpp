@@ -18,6 +18,9 @@ FrontendQp::FrontendQp(Frontend &frontend, int id,
       m_req_rb(req_rb_cap, frontend.direct_alignment()),
       m_resp_rb(resp_rb_cap, frontend.direct_alignment()),
       m_write_alignment(frontend.direct_alignment()) {
+    if (m_write_alignment == 0 || (m_write_alignment & (m_write_alignment - 1)) != 0) {
+        throw_with("FrontendQp: Invalid direct alignment={}", m_write_alignment);
+    }
     docacxx::check_derr(doca_pe_create(&m_pe), "failed to create pe");
     
     m_req_mmap = std::make_unique<docacxx::Mmap>(
@@ -132,9 +135,6 @@ void FrontendQp::prep_write(size_t file_number, size_t offset, int base_size_mul
     size_t header_size = sizeof(IoReqMsg::WriteHeader);
     size_t req_prefix_size = header_size;
     if (is_direct) {
-        if (m_write_alignment == 0 || (m_write_alignment & (m_write_alignment - 1)) != 0) {
-            throw_with("FrontendQp: Invalid direct alignment={}", m_write_alignment);
-        }
         size_t payload_offset = (m_cur_write_req_start_offset + header_size) % m_req_rb.cap();
         direct_padding_len =
             (m_write_alignment - (payload_offset % m_write_alignment)) % m_write_alignment;
@@ -156,15 +156,8 @@ void FrontendQp::prep_write(size_t file_number, size_t offset, int base_size_mul
         throw_with("FrontendQp: Failed to reserve request prefix space");
     }
     m_reserved_req_prefix_space = reserved_prefix_space->cut(header_size);
-
-    // In direct mode, parser must skip zero-padding between header and payload.
-    if (m_cache_header.payload_padding_len > 0) {
-        auto &padding_view = *reserved_prefix_space;
-        std::memset(padding_view.first_part().data(), 0, padding_view.first_part().size());
-        if (padding_view.second_part().has_value()) {
-            std::memset(padding_view.second_part()->data(), 0, padding_view.second_part()->size());
-        }
-    }
+    m_cur_write_payload_start_offset =
+        (m_cur_write_req_start_offset + req_prefix_size) % m_req_rb.cap();
     m_cur_write_req_size += req_prefix_size;
 }
 
@@ -191,9 +184,6 @@ void FrontendQp::post_write() {
     }
     size_t direct_padding_len = static_cast<size_t>(m_cache_header.payload_padding_len);
     if (m_cache_header.is_direct) {
-        if (m_write_alignment == 0 || (m_write_alignment & (m_write_alignment - 1)) != 0) {
-            throw_with("FrontendQp: Invalid direct alignment={}", m_write_alignment);
-        }
         if ((m_cache_header.offset % m_write_alignment) != 0) {
             throw_with("FrontendQp: Direct write offset not aligned[offset={}, alignment={}]",
                 m_cache_header.offset, m_write_alignment);
@@ -238,6 +228,60 @@ void FrontendQp::post_write() {
     m_reserved_req_prefix_space = std::nullopt;
     m_cur_write_req_size = 0;
     m_cur_write_req_start_offset = 0;
+    m_cur_write_payload_start_offset = 0;
+}
+
+bool FrontendQp::copy_cur_write_payload_tail(size_t n, char *dst) const {
+    if (!is_preping_write()) {
+        return false;
+    }
+    if (n > m_cache_header.size) {
+        return false;
+    }
+    if (n == 0) {
+        return true;
+    }
+    size_t tail_offset =
+        (m_cur_write_payload_start_offset + m_cache_header.size - n) % m_req_rb.cap();
+    size_t first_part_size = std::min(n, m_req_rb.cap() - tail_offset);
+    std::memcpy(dst, m_req_rb.data() + tail_offset, first_part_size);
+    if (first_part_size < n) {
+        std::memcpy(dst + first_part_size, m_req_rb.data(), n - first_part_size);
+    }
+    return true;
+}
+
+bool FrontendQp::trim_cur_write_payload_tail(size_t n) {
+    if (!is_preping_write()) {
+        return false;
+    }
+    if (n > m_cache_header.size) {
+        return false;
+    }
+    if (n == 0) {
+        return true;
+    }
+    if (!m_req_rb.rewind(n)) {
+        return false;
+    }
+    m_cache_header.size -= n;
+    m_cur_write_req_size -= n;
+    return true;
+}
+
+bool FrontendQp::discard_prepared_write() {
+    if (!is_preping_write()) {
+        return false;
+    }
+    if (!m_req_rb.rewind(m_cur_write_req_size)) {
+        return false;
+    }
+    m_reserved_req_prefix_space = std::nullopt;
+    m_cur_write_req_size = 0;
+    m_cur_write_req_start_offset = 0;
+    m_cur_write_payload_start_offset = 0;
+    m_cache_header = IoReqMsg::WriteHeader{};
+    return true;
 }
 
 std::vector<std::pair<int, int>> FrontendQp::wait_all() {

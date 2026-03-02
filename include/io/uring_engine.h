@@ -166,11 +166,7 @@ public:
 
         auto &sync_close_ctx = ctx->sync_close_ctx;
         sync_close_ctx.is_valid = true;
-        if (ctx->is_direct) {
-            sync_close_ctx.use_fsync = true; // force fsync for durability
-        } else {
-            sync_close_ctx.use_fsync = use_fsync;
-        }
+        sync_close_ctx.use_fsync = use_fsync;
         sync_close_ctx.cb = cb;
         try_issue_sync_close(ctx);
     }

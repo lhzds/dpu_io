@@ -4,7 +4,6 @@
 #include "bytes.h"
 #include "types.h"
 
-#include <bit>
 #include <algorithm>
 #include <cassert>
 #include <cstring>
@@ -52,7 +51,7 @@ public:
     RingBufferRep() {}
     RingBufferRep(size_t cap, size_t alignment = 1) {
         assert(alignment > 0);
-        assert(std::has_single_bit(alignment));
+        assert((alignment & (alignment - 1)) == 0);
         m_cap = std::max(std::__bit_ceil(cap), alignment);
         m_mask = m_cap - 1;
     }
@@ -114,6 +113,15 @@ public:
 
     size_t tail() const noexcept {
         return m_tail;
+    }
+
+    bool rewind(size_t n) {
+        if (n > m_size) {
+            return false;
+        }
+        m_tail = (m_tail + m_cap - n) & m_mask;
+        m_size -= n;
+        return true;
     }
 
     Slice to_slice() const noexcept {
@@ -286,7 +294,7 @@ public:
     // cap 对齐到 2 的 N 次方
     RingBuffer(size_t cap, size_t alignment = 1): m_rep(cap, alignment), m_alignment(alignment) {
         assert(m_alignment > 0);
-        assert(std::has_single_bit(m_alignment));
+        assert((m_alignment & (m_alignment - 1)) == 0);
         m_buf.reset(m_rep.cap(), m_alignment);
     }
 
@@ -387,6 +395,10 @@ public:
 
     size_t tail() const noexcept {
         return m_rep.tail();
+    }
+
+    bool rewind(size_t n) {
+        return m_rep.rewind(n);
     }
 
     const RingBufferRep &rep() const {

@@ -31,6 +31,15 @@ public:
     size_t cur_write_size() const {
         return m_cur_write_req_size;
     }
+    size_t cur_write_payload_size() const {
+        return m_cache_header.size;
+    }
+    size_t write_alignment() const {
+        return m_write_alignment;
+    }
+    bool copy_cur_write_payload_tail(size_t n, char *dst) const;
+    bool trim_cur_write_payload_tail(size_t n);
+    bool discard_prepared_write();
     void prep_write(size_t file_number, size_t offset, int base_size_multiplier = 1,
                     bool is_direct = false);
     void append(const ConstBytesView &content);
@@ -64,10 +73,10 @@ private:
     int m_sync_close_cnt{}; // 当前仍未完成的请求数
     size_t m_cur_write_req_size{};
     size_t m_cur_write_req_start_offset{};
+    size_t m_cur_write_payload_start_offset{};
     std::optional<RingBuffer::View> m_reserved_req_prefix_space;
     IoReqMsg::WriteHeader m_cache_header;
     size_t m_write_alignment{1};
-
     RingBuffer m_req_rb;
     RingBuffer m_resp_rb;
     std::unique_ptr<docacxx::Mmap> m_req_mmap;

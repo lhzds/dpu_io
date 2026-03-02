@@ -12,7 +12,7 @@
 #include <spdlog/spdlog.h>
 
 namespace pulsedb {
-    
+
 Backend::Backend(const std::string_view &name, const std::string_view &dev_pci,
     const std::string_view &dev_rep_pci, std::unique_ptr<IoEngine> io_ctx,
     size_t dpu_dma_task_slot_num, size_t dpu_req_rb_cap, size_t dpu_resp_rb_cap)
@@ -225,7 +225,6 @@ void Backend::submit_request_to_io_engine(int qp_id, ReqRbMapping::DpuRbView &re
                 "[Write: file_number={}, offset={}, size={}]",
                 qp_id, header.file_number, header.offset, header.size
             );
-            
             auto *cb = IoEngine::CallbackFn::make(
                 [&, qp_id, offset=header.offset, size=header.size]
                 (size_t file_number, int res) {

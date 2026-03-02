@@ -9,6 +9,5 @@ packages/
 # MacOS Cache
 .DS_Store
 
-bench/fio/output/
-bench/uring/output/
+bench/*/output/
 scripts/dpu/run_log
